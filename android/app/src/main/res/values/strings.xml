@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_name">ARC Finance Виджет</string>
+    <string name="widget_description">Быстрый просмотр баланса и добавление трат в 1 клик с экрана смартфона</string>
+    <string name="widget_winter_name">ARC Winter Arc (Дисциплина)</string>
+    <string name="widget_winter_description">Баланс, стрик дисциплины и сетка квадратов в 1 тап</string>
+    <string name="widget_capy_name">Капибара: Финансовые предсказания</string>
+    <string name="widget_capy_description">Ежедневная мудрость, мемы и советы от Капибары на рабочем столе</string>
+    <string name="widget_mini_name">ARC Finance: Мини-баланс</string>
+    <string name="widget_mini_description">Компактный баланс и быстрый расход в 1 клик</string>
+    <string name="widget_quick_name">ARC Finance: Быстрые платежи (1 тап)</string>
+    <string name="widget_quick_description">Мгновенная запись расходов в 1 тап (Маршрутка, Кофе, Обед, Такси)</string>
+    <string name="accessibility_service_name">ARC Finance — Сканер чеков MBank</string>
+    <string name="accessibility_service_description">Служба специальных возможностей для чтения сумм и чеков прямо из интерфейса MBank. Обеспечивает надежный учет без задержек и независимо от оптимизации батареи.</string>
+</resources>

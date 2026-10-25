@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="ARC: Осознанные финансы, Apple Glass виджет и трекер дисциплины Winter Arc.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ARC">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>ARC Finance — Осознанные финансы</title>
+  <meta name="theme-color" content="#0A0A0C">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body style="background-color: #0A0A0C; margin: 0; padding: 0;">
+  <script>
+    // Register ARC Capybara ServiceWorker for system shade notifications
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('sw.js').then(function(reg) {
+          console.log('ARC SW registered with scope:', reg.scope);
+          // If update available, update
+          reg.update();
+        }).catch(function(err) {
+          console.warn('ARC SW failed:', err);
+        });
+      });
+    }
+
+    window.arcGetPermission = function() {
+      if (!("Notification" in window)) return "unsupported";
+      return Notification.permission;
+    };
+
+    window.arcRequestPermission = function() {
+      if (!("Notification" in window)) return Promise.resolve(false);
+      return Notification.requestPermission().then(function(perm) {
+        return perm === "granted";
+      });
+    };
+
+    window.arcNotify = function(title, body, icon) {
+      if (!("Notification" in window)) return;
+
+      var options = {
+        body: body || '',
+        icon: icon || 'icons/Icon-192.png',
+        badge: 'icons/Icon-192.png',
+        vibrate: [300, 150, 300],
+        tag: 'arc-capybara-' + Date.now(),
+        renotify: true,
+        requireInteraction: false,
+        data: { url: window.location.href }
+      };
+
+      if (Notification.permission === "granted") {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: title,
+            options: options
+          });
+        }
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(function(reg) {
+            return reg.showNotification(title, options);
+          }).catch(function() {
+            try { new Notification(title, options); } catch(e) {}
+          });
+        } else {
+          try { new Notification(title, options); } catch(e) {}
+        }
+      } else if (Notification.permission === "default") {
+        Notification.requestPermission().then(function(perm) {
+          if (perm === "granted") {
+            window.arcNotify(title, body, icon);
+          }
+        });
+      }
+    };
+
+    // Schedule background push for when user leaves the tab (in another app / shade)
+    window.arcScheduleBackgroundPush = function(seconds, title, body) {
+      var options = {
+        body: body || '',
+        icon: 'icons/Icon-192.png',
+        badge: 'icons/Icon-192.png',
+        vibrate: [300, 150, 300],
+        tag: 'arc-shade-' + Date.now(),
+        renotify: true,
+        data: { url: window.location.href }
+      };
+
+      // 1. Send to Service Worker background thread (persists even when tab is minimized)
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SCHEDULE_NOTIFICATION',
+          seconds: seconds || 5,
+          title: title,
+          options: options
+        });
+      }
+
+      // 2. Tab fallback
+      setTimeout(function() {
+        window.arcNotify(title, body);
+      }, (seconds || 5) * 1000);
+    };
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
