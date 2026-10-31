@@ -64,7 +64,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal">
 
-        <!-- 1. Маршрутка 25 сом -->
+        <!-- 1. Динамическая кнопка 0 (Маршрутка по умолчанию) -->
         <LinearLayout
             android:id="@+id/btn_quick_marshrutka"
             android:layout_width="0dp"
@@ -74,29 +74,37 @@
             android:background="@drawable/widget_btn_quick_tile"
             android:gravity="center"
             android:orientation="vertical"
+            android:paddingLeft="3dp"
+            android:paddingRight="3dp"
             android:paddingTop="9dp"
             android:paddingBottom="9dp">
 
             <TextView
+                android:id="@+id/btn_quick_0_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="МАРШРУТКА"
                 android:textColor="#0A84FF"
                 android:textSize="8.5sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.04" />
+                android:letterSpacing="0.04"
+                android:maxLines="1"
+                android:ellipsize="end" />
 
             <TextView
+                android:id="@+id/btn_quick_0_amount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text="25 сом"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
         </LinearLayout>
 
-        <!-- 2. Кофе 150 сом -->
+        <!-- 2. Динамическая кнопка 1 (Кофе по умолчанию) -->
         <LinearLayout
             android:id="@+id/btn_quick_coffee"
             android:layout_width="0dp"
@@ -107,29 +115,37 @@
             android:background="@drawable/widget_btn_quick_tile"
             android:gravity="center"
             android:orientation="vertical"
+            android:paddingLeft="3dp"
+            android:paddingRight="3dp"
             android:paddingTop="9dp"
             android:paddingBottom="9dp">
 
             <TextView
+                android:id="@+id/btn_quick_1_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="КОФЕ"
                 android:textColor="#FF9F0A"
                 android:textSize="8.5sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.04" />
+                android:letterSpacing="0.04"
+                android:maxLines="1"
+                android:ellipsize="end" />
 
             <TextView
+                android:id="@+id/btn_quick_1_amount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text="150 сом"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
         </LinearLayout>
 
-        <!-- 3. Обед 350 сом -->
+        <!-- 3. Динамическая кнопка 2 (Обед по умолчанию) -->
         <LinearLayout
             android:id="@+id/btn_quick_lunch"
             android:layout_width="0dp"
@@ -140,29 +156,37 @@
             android:background="@drawable/widget_btn_quick_tile"
             android:gravity="center"
             android:orientation="vertical"
+            android:paddingLeft="3dp"
+            android:paddingRight="3dp"
             android:paddingTop="9dp"
             android:paddingBottom="9dp">
 
             <TextView
+                android:id="@+id/btn_quick_2_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="ОБЕД"
                 android:textColor="#FF453A"
                 android:textSize="8.5sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.04" />
+                android:letterSpacing="0.04"
+                android:maxLines="1"
+                android:ellipsize="end" />
 
             <TextView
+                android:id="@+id/btn_quick_2_amount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text="350 сом"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
         </LinearLayout>
 
-        <!-- 4. Такси 180 сом -->
+        <!-- 4. Динамическая кнопка 3 (Такси по умолчанию) -->
         <LinearLayout
             android:id="@+id/btn_quick_taxi"
             android:layout_width="0dp"
@@ -172,26 +196,34 @@
             android:background="@drawable/widget_btn_quick_tile"
             android:gravity="center"
             android:orientation="vertical"
+            android:paddingLeft="3dp"
+            android:paddingRight="3dp"
             android:paddingTop="9dp"
             android:paddingBottom="9dp">
 
             <TextView
+                android:id="@+id/btn_quick_3_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="ТАКСИ"
                 android:textColor="#FFD60A"
                 android:textSize="8.5sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.04" />
+                android:letterSpacing="0.04"
+                android:maxLines="1"
+                android:ellipsize="end" />
 
             <TextView
+                android:id="@+id/btn_quick_3_amount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text="180 сом"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
         </LinearLayout>
     </LinearLayout>
 

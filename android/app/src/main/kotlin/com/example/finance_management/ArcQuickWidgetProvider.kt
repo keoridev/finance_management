@@ -24,11 +24,17 @@ class ArcQuickWidgetProvider : AppWidgetProvider() {
             try {
                 val views = RemoteViews(context.packageName, R.layout.arc_quick_widget)
 
+                val prefs = try {
+                    context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error opening prefs: ${e.message}")
+                    null
+                }
+
                 // Read cached balance from SharedPreferences
                 try {
-                    val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    val rawBalance = prefs.getString("flutter.arc_widget_balance_display", null)
-                        ?: prefs.getString("arc_widget_balance_display", null)
+                    val rawBalance = prefs?.getString("flutter.arc_widget_balance_display", null)
+                        ?: prefs?.getString("arc_widget_balance_display", null)
                     views.setTextViewText(R.id.quick_widget_balance, if (!rawBalance.isNullOrEmpty()) rawBalance else "0,00 сом")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error reading prefs: ${e.message}")
@@ -59,45 +65,63 @@ class ArcQuickWidgetProvider : AppWidgetProvider() {
                     PendingIntent.getActivity(context, 11, customExpenseIntent, pendingFlags)
                 )
 
-                // 3. Click on "Маршрутка" (25 сом)
-                val marshrutkaIntent = Intent(context, MainActivity::class.java).apply {
-                    putExtra("quick_action", "shortcut:marshrutka")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                views.setOnClickPendingIntent(
-                    R.id.btn_quick_marshrutka,
-                    PendingIntent.getActivity(context, 12, marshrutkaIntent, pendingFlags)
+                // 3. Dynamic Quick Buttons (the ones user last entered)
+                val buttonLayouts = arrayOf(
+                    Triple(R.id.btn_quick_marshrutka, R.id.btn_quick_0_title, R.id.btn_quick_0_amount),
+                    Triple(R.id.btn_quick_coffee, R.id.btn_quick_1_title, R.id.btn_quick_1_amount),
+                    Triple(R.id.btn_quick_lunch, R.id.btn_quick_2_title, R.id.btn_quick_2_amount),
+                    Triple(R.id.btn_quick_taxi, R.id.btn_quick_3_title, R.id.btn_quick_3_amount)
                 )
 
-                // 4. Click on "Кофе" (150 сом)
-                val coffeeIntent = Intent(context, MainActivity::class.java).apply {
-                    putExtra("quick_action", "shortcut:coffee")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                views.setOnClickPendingIntent(
-                    R.id.btn_quick_coffee,
-                    PendingIntent.getActivity(context, 13, coffeeIntent, pendingFlags)
+                val defaultButtons = arrayOf(
+                    Triple("МАРШРУТКА", 25.0, "cat_transport"),
+                    Triple("КОФЕ", 150.0, "cat_restaurants"),
+                    Triple("ОБЕД", 350.0, "cat_restaurants"),
+                    Triple("ТАКСИ", 180.0, "cat_transport")
                 )
 
-                // 5. Click on "Обед" (350 сом)
-                val lunchIntent = Intent(context, MainActivity::class.java).apply {
-                    putExtra("quick_action", "shortcut:lunch")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                views.setOnClickPendingIntent(
-                    R.id.btn_quick_lunch,
-                    PendingIntent.getActivity(context, 14, lunchIntent, pendingFlags)
-                )
+                for (i in 0 until 4) {
+                    val viewsTriple = buttonLayouts[i]
+                    val defTriple = defaultButtons[i]
 
-                // 6. Click on "Такси" (180 сом)
-                val taxiIntent = Intent(context, MainActivity::class.java).apply {
-                    putExtra("quick_action", "shortcut:taxi")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    var title = prefs?.getString("flutter.arc_widget_btn_${i}_title", null)
+                        ?: prefs?.getString("arc_widget_btn_${i}_title", null)
+                    var amount = try {
+                        val f = prefs?.getFloat("flutter.arc_widget_btn_${i}_amount", -1f) ?: -1f
+                        if (f >= 0) f.toDouble() else {
+                            val f2 = prefs?.getFloat("arc_widget_btn_${i}_amount", -1f) ?: -1f
+                            if (f2 >= 0) f2.toDouble() else null
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    var categoryId = prefs?.getString("flutter.arc_widget_btn_${i}_cat", null)
+                        ?: prefs?.getString("arc_widget_btn_${i}_cat", null)
+
+                    if (title.isNullOrEmpty() || amount == null || amount <= 0) {
+                        title = defTriple.first
+                        amount = defTriple.second
+                        categoryId = defTriple.third
+                    }
+
+                    val formattedAmount = if (amount % 1.0 == 0.0) {
+                        "${amount.toInt()} сом"
+                    } else {
+                        String.format(java.util.Locale.US, "%.1f сом", amount)
+                    }
+
+                    views.setTextViewText(viewsTriple.second, title.uppercase())
+                    views.setTextViewText(viewsTriple.third, formattedAmount)
+
+                    val shortcutIntent = Intent(context, MainActivity::class.java).apply {
+                        putExtra("quick_action", "shortcut_dynamic:$i:$title:$amount:$categoryId")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    }
+                    views.setOnClickPendingIntent(
+                        viewsTriple.first,
+                        PendingIntent.getActivity(context, 100 + i, shortcutIntent, pendingFlags)
+                    )
                 }
-                views.setOnClickPendingIntent(
-                    R.id.btn_quick_taxi,
-                    PendingIntent.getActivity(context, 15, taxiIntent, pendingFlags)
-                )
 
                 appWidgetManager.updateAppWidget(appWidgetId, views)
             } catch (t: Throwable) {

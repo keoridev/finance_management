@@ -1,4 +1,5 @@
 import '../models/transaction_type.dart';
+import 'merchant_memory_service.dart';
 
 class ParsedMBankNotification {
   final double amount;
@@ -10,6 +11,7 @@ class ParsedMBankNotification {
   final String rawText;
   final DateTime timestamp;
   final bool isSalary;
+  final bool isBalanceOnly;
 
   const ParsedMBankNotification({
     required this.amount,
@@ -21,6 +23,7 @@ class ParsedMBankNotification {
     required this.rawText,
     required this.timestamp,
     this.isSalary = false,
+    this.isBalanceOnly = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -33,6 +36,7 @@ class ParsedMBankNotification {
     'rawText': rawText,
     'timestamp': timestamp.millisecondsSinceEpoch,
     'isSalary': isSalary,
+    'isBalanceOnly': isBalanceOnly,
   };
 
   factory ParsedMBankNotification.fromJson(Map<String, dynamic> json) {
@@ -46,31 +50,201 @@ class ParsedMBankNotification {
       rawText: json['rawText'] as String? ?? '',
       timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch),
       isSalary: json['isSalary'] as bool? ?? false,
+      isBalanceOnly: json['isBalanceOnly'] as bool? ?? false,
     );
   }
 }
 
 class MBankParserService {
-  // Common Kyrgyz Som indicators (including c, сом, KGS, SOM)
-  static final RegExp _amountRegex = RegExp(
-    r'(?:[+\-–—]\s*)?(\d{1,3}(?:[\s\u00A0]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:сом|KGS|kgs|c\.|C\.|som|SOM|[cс]\b)',
+  // Regex to extract card last digits (e.g. *1234, ...1234, Карта: 1234)
+  static final RegExp _cardDigitsRegex = RegExp(
+    r'(?:\*|\.\.\.|\bкарта\s*|karta\s*)(\d{4})',
     caseSensitive: false,
   );
 
+  // Flexible Kyrgyz Som amount indicator
+  static final RegExp _generalAmountRegex = RegExp(
+    r'(?:[+\-–—]\s*)?((?:\d{1,3}(?:[\s\u00A0]\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*(?:сом|KGS|kgs|som|SOM|[cс]\.|\b[cс]\b|[cс](?=[.,\s]|$))',
+    caseSensitive: false,
+    unicode: true,
+  );
+
+  // High-reliability balance regex: matches balance/available keywords
+  // with flexible intervening words ("карты *1234:", "на карте:", "счета:", "средств:", Kyrgyz "калдык:", "жеткиликтүү:")
   static final RegExp _balanceRegex = RegExp(
-    r'(?:доступно|баланс|остаток|dostupno|balans|ostatok)[:\s]*(\d{1,3}(?:[\s\u00A0]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:сом|KGS|kgs|c\.|C\.|som|SOM|[cс]\b)?',
+    r'(?:ваш\s+)?(?:доступно|баланс|остаток|dostupno|balans|ostatok|калдык|жеткиликтүү)(?:\s+(?:на\s+)?(?:карте|карты|счете|счета|средств))?(?:\s*(?:\*|\.\.\.|\bкарты?\s+|\bкарта\s+|\bkarta\s+|\bсчета?\s+)\d{4})?\s*[:\s–—\-]+\s*((?:\d{1,3}(?:[\s\u00A0]\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*(?:сом|KGS|kgs|som|SOM|[cс]\.|\b[cс]\b|[cс](?=[.,\s]|$))?',
     caseSensitive: false,
+    unicode: true,
   );
 
-  static final RegExp _cardDigitsRegex = RegExp(r'\*(\d{4})');
+  // Action-specific amount regex (matches amount directly attached to action verb, without crossing balance keywords or sentences)
+  static final RegExp _actionAmountRegex = RegExp(
+    r'(?:оплата|покупка|списание|перевод|пополнение|зачисление|снятие|platezh|oplata|popolnen|spisanie|pokupka|төлөм|которулган)(?:(?!\b(?:баланс|доступно|остаток|калдык)\b)[^0-9\n.;]){0,25}?((?:\d{1,3}(?:[\s\u00A0]\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*(?:сом|KGS|kgs|som|SOM|[cс]\.|\b[cс]\b|[cс](?=[.,\s]|$))',
+    caseSensitive: false,
+    unicode: true,
+  );
 
-  /// Parse any incoming text from MBank Push Notification, SMS, or Clipboard
+  /// Parse any incoming text from MBank Push Notification, SMS, or Accessibility Screen
   static ParsedMBankNotification? parse(String text) {
     if (text.trim().isEmpty) return null;
 
     final lower = text.toLowerCase();
 
-    // 1. Determine Income vs Expense
+    // 1. Extract Card digits
+    String? cardDigits;
+    final cardMatch = _cardDigitsRegex.firstMatch(text);
+    if (cardMatch != null) {
+      cardDigits = cardMatch.group(1);
+    }
+
+    // 2. Extract Balance After Transaction / Available Balance (if present)
+    double? balanceAfter;
+    Match? balanceMatch;
+    for (final match in _balanceRegex.allMatches(text)) {
+      final rawBalStr = match.group(1);
+      if (rawBalStr != null) {
+        final cleanedBal = rawBalStr
+            .replaceAll(' ', '')
+            .replaceAll('\u00A0', '')
+            .replaceAll(',', '.');
+        // Reject card number if accidentally matched
+        if (cardDigits != null && cleanedBal == cardDigits) {
+          continue;
+        }
+        final val = double.tryParse(cleanedBal);
+        if (val != null) {
+          balanceAfter = val;
+          balanceMatch = match;
+          break;
+        }
+      }
+    }
+
+    // 3. Determine if notification contains explicit transaction actions
+    final bool hasTransactionAction = lower.contains('оплат') ||
+        lower.contains('покупк') ||
+        lower.contains('списан') ||
+        lower.contains('перевод') ||
+        lower.contains('сняти') ||
+        lower.contains('пополнен') ||
+        lower.contains('зачислен') ||
+        lower.contains('начислен') ||
+        lower.contains('зарплат') ||
+        lower.contains('з/п') ||
+        lower.contains('salary') ||
+        lower.contains('аванс') ||
+        lower.contains('avans') ||
+        lower.contains('возврат') ||
+        lower.contains('vozvrat') ||
+        lower.contains('чек') ||
+        lower.contains('квитанци') ||
+        lower.contains('комисси') ||
+        lower.contains('oplata') ||
+        lower.contains('platezh') ||
+        lower.contains('pokupka') ||
+        lower.contains('spisanie') ||
+        lower.contains('popolnen') ||
+        lower.contains('төлөм') ||
+        lower.contains('которулган') ||
+        text.contains('+') ||
+        text.contains('−') ||
+        text.contains('-') ||
+        lower.contains('google pay') ||
+        lower.contains('google wallet') ||
+        lower.contains('gpay');
+
+    // 4. Extract Transaction Amount (safely excluding the balance amount)
+    double? amount;
+    String? rawAmountStr;
+
+    // A. First try to extract amount attached directly to an action verb
+    final actionMatch = _actionAmountRegex.firstMatch(text);
+    if (actionMatch != null) {
+      final cand = actionMatch.group(1);
+      if (cand != null) {
+        final candStart = actionMatch.start + (actionMatch.group(0)!.indexOf(cand));
+        final isInsideBalance = balanceMatch != null &&
+            candStart >= balanceMatch.start &&
+            candStart <= balanceMatch.end;
+
+        if (!isInsideBalance) {
+          final cleaned = cand
+              .replaceAll(' ', '')
+              .replaceAll('\u00A0', '')
+              .replaceAll(',', '.');
+          final val = double.tryParse(cleaned);
+          if (val != null && val > 0) {
+            amount = val;
+            rawAmountStr = cand;
+          }
+        }
+      }
+    }
+
+    // B. If not found or no action match, scan all general currency amounts,
+    // explicitly SKIPPING any match that falls inside the balance pattern!
+    if (amount == null) {
+      for (final match in _generalAmountRegex.allMatches(text)) {
+        if (balanceMatch != null &&
+            match.start >= balanceMatch.start &&
+            match.end <= balanceMatch.end) {
+          // This number is the balance, NEVER treat it as transaction amount!
+          continue;
+        }
+
+        final cand = match.group(1);
+        if (cand == null) continue;
+
+        final cleaned = cand
+            .replaceAll(' ', '')
+            .replaceAll('\u00A0', '')
+            .replaceAll(',', '.');
+        final val = double.tryParse(cleaned);
+        if (val != null && val > 0) {
+          amount = val;
+          rawAmountStr = cand;
+          break;
+        }
+      }
+    }
+
+    // 5. Handle Pure Balance Notifications (e.g. "MBank: Баланс карты *4820: 90 000 сом")
+    // If we have a balance, but NO transaction amount or NO transaction action:
+    if (balanceAfter != null && (amount == null || !hasTransactionAction)) {
+      return ParsedMBankNotification(
+        amount: 0.0,
+        type: TransactionType.income,
+        title: 'Баланс MBank',
+        categoryId: 'cat_other',
+        balanceAfter: balanceAfter,
+        cardLastDigits: cardDigits,
+        rawText: text,
+        timestamp: DateTime.now(),
+        isSalary: false,
+        isBalanceOnly: true,
+      );
+    }
+
+    // If no valid amount found, cannot parse as transaction
+    if (amount == null || amount <= 0) {
+      if (balanceAfter != null) {
+        return ParsedMBankNotification(
+          amount: 0.0,
+          type: TransactionType.income,
+          title: 'Баланс MBank',
+          categoryId: 'cat_other',
+          balanceAfter: balanceAfter,
+          cardLastDigits: cardDigits,
+          rawText: text,
+          timestamp: DateTime.now(),
+          isSalary: false,
+          isBalanceOnly: true,
+        );
+      }
+      return null;
+    }
+
+    // 6. Determine Income vs Expense
     bool isIncome = false;
     bool isSalary = false;
 
@@ -92,6 +266,7 @@ class MBankParserService {
         lower.contains('postupil') ||
         lower.contains('vozvrat') ||
         lower.contains('возврат') ||
+        lower.contains('которулган') ||
         text.contains('+')) {
       isIncome = true;
     } else if (lower.contains('списан') ||
@@ -104,48 +279,14 @@ class MBankParserService {
         lower.contains('spisanie') ||
         lower.contains('oplata') ||
         lower.contains('pokupka') ||
+        lower.contains('төлөм') ||
+        text.contains('−') ||
         text.contains('-')) {
       isIncome = false;
     } else {
-      // Default guess based on sign or keywords
       if (text.contains('+')) {
         isIncome = true;
       }
-    }
-
-    // 2. Extract Amount
-    final amountMatch = _amountRegex.firstMatch(text);
-    if (amountMatch == null) return null;
-
-    final rawAmountStr = amountMatch.group(1);
-    if (rawAmountStr == null) return null;
-
-    final cleanedAmount = rawAmountStr
-        .replaceAll(' ', '')
-        .replaceAll('\u00A0', '')
-        .replaceAll(',', '.');
-    final amount = double.tryParse(cleanedAmount);
-    if (amount == null || amount <= 0) return null;
-
-    // 3. Extract Balance After Transaction (if present)
-    double? balanceAfter;
-    final balanceMatch = _balanceRegex.firstMatch(text);
-    if (balanceMatch != null) {
-      final rawBalStr = balanceMatch.group(1);
-      if (rawBalStr != null) {
-        final cleanedBal = rawBalStr
-            .replaceAll(' ', '')
-            .replaceAll('\u00A0', '')
-            .replaceAll(',', '.');
-        balanceAfter = double.tryParse(cleanedBal);
-      }
-    }
-
-    // 4. Extract Card digits
-    String? cardDigits;
-    final cardMatch = _cardDigitsRegex.firstMatch(text);
-    if (cardMatch != null) {
-      cardDigits = cardMatch.group(1);
     }
 
     // 5. Categorize and generate title
@@ -257,11 +398,39 @@ class MBankParserService {
           lower.contains('фарм') ||
           lower.contains('бимед') ||
           lower.contains('бонецк') ||
+          lower.contains('аквалаб') ||
+          lower.contains('aquilab') ||
+          lower.contains('инвитро') ||
+          lower.contains('invitro') ||
+          lower.contains('евролаб') ||
+          lower.contains('eurolab') ||
+          lower.contains('гаммалаб') ||
+          lower.contains('анализ') ||
+          lower.contains('лаборатор') ||
+          lower.contains('юрфа') ||
+          lower.contains('неомед') ||
           lower.contains('клиника') ||
+          lower.contains('госпитал') ||
+          lower.contains('стоматолог') ||
+          lower.contains('дентал') ||
+          lower.contains('dental') ||
+          lower.contains('диагност') ||
+          lower.contains('узи') ||
+          lower.contains('мрт') ||
+          lower.contains('рентген') ||
+          lower.contains('medcheck') ||
           lower.contains('лекарь')) {
         categoryId = 'cat_health';
         title = extractedMerchant ??
-            (lower.contains('неман') ? 'Аптека Неман' : 'Аптека и здоровье');
+            (lower.contains('бонецк')
+                ? 'Лаборатория Бонецкого'
+                : (lower.contains('аквалаб')
+                    ? 'Лаборатория Аквалаб'
+                    : (lower.contains('инвитро')
+                        ? 'Инвитро'
+                        : (lower.contains('анализ') || lower.contains('лаборатор')
+                            ? 'Медицинские анализы'
+                            : (lower.contains('неман') ? 'Аптека Неман' : 'Аптека и здоровье')))));
       } else if (lower.contains('коммунал') ||
           lower.contains('северэлектро') ||
           lower.contains('тазалык') ||
@@ -292,6 +461,12 @@ class MBankParserService {
       } else if (extractedMerchant != null) {
         title = extractedMerchant;
       }
+
+      // Check user-learned merchant memory override
+      final learnedCategory = MerchantMemoryService.getCategoryForTextSync(text);
+      if (learnedCategory != null) {
+        categoryId = learnedCategory;
+      }
     }
 
     // Preserve direct merchant or recipient name from screen capture if available
@@ -316,7 +491,7 @@ class MBankParserService {
     );
   }
 
-  static String? _extractMerchantName(String text, String rawAmountStr, String? rawBalStr) {
+  static String? _extractMerchantName(String text, String? rawAmountStr, String? rawBalStr) {
     // 1. Direct preposition patterns: "в [Store]", "at [Store]", "v [Store]"
     final atMatch = RegExp(
       r"""(?:в|at|v|u)\s+([A-Za-zА-Яа-яЁё0-9\s"'\-#]{3,35}?)(?:[.,;\n]|баланс|dostupno|остаток|$)""",
@@ -342,7 +517,7 @@ class MBankParserService {
     for (final seg in segments) {
       final clean = seg.trim();
       if (clean.length < 3 || clean.length > 40) continue;
-      if (clean.contains(rawAmountStr)) continue;
+      if (rawAmountStr != null && rawAmountStr.isNotEmpty && clean.contains(rawAmountStr)) continue;
       if (rawBalStr != null && clean.contains(rawBalStr)) continue;
 
       final lower = clean.toLowerCase();

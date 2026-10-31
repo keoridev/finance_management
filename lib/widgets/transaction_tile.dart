@@ -96,28 +96,28 @@ class TransactionTile extends StatelessWidget {
           ],
         ),
       ),
-      // Swipe Left Background (Delete)
+      // Swipe Left Background (Move to Archive)
       secondaryBackground: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: AppColors.expense.withValues(alpha: 0.22),
+          color: const Color(0xFFFF9F0A).withValues(alpha: 0.22),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.expense.withValues(alpha: 0.35), width: 0.8),
+          border: Border.all(color: const Color(0xFFFF9F0A).withValues(alpha: 0.35), width: 0.8),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Удалить',
+              'В архив',
               style: TextStyle(
-                color: AppColors.expense,
+                color: Color(0xFFFF9F0A),
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
               ),
             ),
             SizedBox(width: 8),
-            Icon(Icons.delete_outline_rounded, color: AppColors.expense, size: 22),
+            Icon(Icons.archive_outlined, color: Color(0xFFFF9F0A), size: 22),
           ],
         ),
       ),

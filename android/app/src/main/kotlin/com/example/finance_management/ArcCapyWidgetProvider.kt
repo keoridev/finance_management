@@ -23,8 +23,12 @@ class ArcCapyWidgetProvider : AppWidgetProvider() {
         if (intent.action == ACTION_CYCLE_PREDICTION) {
             try {
                 val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val currentIndex = prefs.getInt("capy_widget_quote_index", 0)
-                prefs.edit().putInt("capy_widget_quote_index", currentIndex + 1).apply()
+                val currentIndex = try {
+                    prefs.getLong("capy_widget_quote_index", 0L).toInt()
+                } catch (_: ClassCastException) {
+                    prefs.getInt("capy_widget_quote_index", 0)
+                }
+                prefs.edit().putLong("capy_widget_quote_index", (currentIndex + 1).toLong()).apply()
 
                 val appWidgetManager = AppWidgetManager.getInstance(context)
                 val component = ComponentName(context, ArcCapyWidgetProvider::class.java)
@@ -60,7 +64,11 @@ class ArcCapyWidgetProvider : AppWidgetProvider() {
                 val views = RemoteViews(context.packageName, R.layout.arc_capy_widget)
 
                 val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val quoteIndex = prefs.getInt("capy_widget_quote_index", 0)
+                val quoteIndex = try {
+                    prefs.getLong("capy_widget_quote_index", 0L).toInt()
+                } catch (_: ClassCastException) {
+                    prefs.getInt("capy_widget_quote_index", 0)
+                }
                 val safeIndex = Math.abs(quoteIndex) % PREDICTIONS.size
 
                 val customBody = prefs.getString("flutter.arc_widget_capy_body", null)

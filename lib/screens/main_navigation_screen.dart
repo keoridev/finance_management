@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_notification.dart';
+import '../models/quick_payment_shortcut.dart';
 import '../models/transaction_type.dart';
 import '../models/workout_penalty.dart';
 import '../services/clipboard_parser_service.dart';
@@ -36,6 +38,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   late final PageController _pageController;
   late final NotificationController _notificationController;
   Timer? _clipboardTimer;
+  Timer? _permissionTimer;
 
   @override
   void initState() {
@@ -119,6 +122,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         isWinterChecked: widget.controller.isWinterCheckedToday,
         accountName: widget.controller.activeAccountLabel,
         todaySpent: widget.controller.todaySpentLabel,
+        quickButtons: widget.controller.quickButtonsForWidget,
       );
     }
 
@@ -129,15 +133,202 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndImportPendingBankNotifications();
       _checkAndImportPendingScrapedBalances();
-      _clipboardTimer = Timer(const Duration(milliseconds: 1200), () {
+      _clipboardTimer = Timer(const Duration(milliseconds: 150), () {
         if (mounted) _checkClipboardForExpense();
       });
+      _permissionTimer = Timer(const Duration(milliseconds: 350), () {
+        if (mounted) _checkNotificationListenerOnStartup();
+      });
     });
+  }
+
+  Future<void> _checkNotificationListenerOnStartup() async {
+    if (!mounted) return;
+
+    try {
+      final isGranted = await WidgetLaunchService.isNotificationListenerEnabled();
+      if (!isGranted && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        final lastPrompt = prefs.getInt('arc_listener_last_prompt_ms') ?? 0;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        // Prompt at most once every 24 hours until enabled
+        if (now - lastPrompt > 24 * 60 * 60 * 1000 && mounted) {
+          await prefs.setInt('arc_listener_last_prompt_ms', now);
+          if (mounted) {
+            _showNotificationListenerBottomSheet();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[MainNavigationScreen] Notification listener startup check non-fatal error: $e');
+    }
+  }
+
+  void _showNotificationListenerBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141417),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 30,
+              offset: const Offset(0, -6),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF00E5FF), Color(0xFF0072FF)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                    blurRadius: 18,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.notifications_active_rounded,
+                size: 30,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Авто-учет MBank и NFC',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Чтобы ARC Finance автоматически записывал ваши платежи и баланс при оплате картой, через MBank или Google Pay, включите «Доступ к уведомлениям».',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+                color: Colors.white.withValues(alpha: 0.7),
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF00E5FF)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'В открывшихся настройках найдите ARC FINANCE и активируйте тумблер',
+                      style: TextStyle(fontSize: 11.5, color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      'Позже',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      await WidgetLaunchService.openNotificationListenerSettings();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00E5FF),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Включить доступ',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        SizedBox(width: 6),
+                        Icon(Icons.arrow_forward_rounded, size: 16),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _clipboardTimer?.cancel();
+    _permissionTimer?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
@@ -157,30 +348,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
             context,
             penalty: penalty,
             controller: widget.controller,
-          );
-        }
-      });
-    }
-
-    // Check if Smart Round-up took place
-    final roundUp = widget.controller.lastRoundUpAmount;
-    final goalTitle = widget.controller.lastRoundUpGoalTitle;
-    if (roundUp != null && roundUp > 0 && goalTitle != null) {
-      widget.controller.clearLastRoundUp();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _notificationController.showNotification(
-            AppNotification(
-              id: 'roundup_${DateTime.now().millisecondsSinceEpoch}',
-              type: NotificationType.dreamSavings,
-              title: 'Умное округление в копилку',
-              body: '+${roundUp.toInt()} сом улетели в копилку на $goalTitle!',
-              actionLabel: 'В копилку',
-              onAction: () {
-                _notificationController.dismissActiveNotification();
-                _switchTab(0);
-              },
-            ),
           );
         }
       });
@@ -241,6 +408,27 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     final parsed = MBankParserService.parse(fullText);
     if (parsed == null) return;
 
+    // Pure balance notification from bank: update account balance safely, NO expense created!
+    if (parsed.isBalanceOnly) {
+      if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
+        widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+        _notificationController.showNotification(
+          AppNotification(
+            id: 'mbank_bal_${DateTime.now().millisecondsSinceEpoch}',
+            type: NotificationType.mbankAutoSync,
+            title: 'Баланс MBank: ${CurrencyFormatter.format(parsed.balanceAfter!)}',
+            body: 'Баланс счета актуализирован из уведомления',
+            actionLabel: 'Смотреть',
+            onAction: () {
+              _notificationController.dismissActiveNotification();
+              _switchTab(0);
+            },
+          ),
+        );
+      }
+      return;
+    }
+
     final source = raw['source'] as String? ?? 'notification';
     final isScreen = source == 'accessibility_screen';
 
@@ -274,41 +462,96 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   }
 
   void _handleQuickShortcutExecution(String shortcutKey) {
-    String title;
-    double amount;
-    String categoryId;
+    String title = 'Платеж';
+    double amount = 0.0;
+    String categoryId = 'cat_restaurants';
 
-    switch (shortcutKey) {
-      case 'marshrutka':
-        title = 'Маршрутка';
-        amount = 25.0;
-        categoryId = 'cat_transport';
-        break;
-      case 'coffee':
-        title = 'Кофе';
-        amount = 150.0;
-        categoryId = 'cat_restaurants';
-        break;
-      case 'lunch':
-        title = 'Обед';
-        amount = 350.0;
-        categoryId = 'cat_restaurants';
-        break;
-      case 'taxi':
-        title = 'Такси';
-        amount = 180.0;
-        categoryId = 'cat_transport';
-        break;
-      default:
-        final match = widget.controller.quickShortcuts.firstWhere(
-          (s) => s.id == shortcutKey || s.title.toLowerCase().contains(shortcutKey),
-          orElse: () => widget.controller.quickShortcuts.first,
-        );
-        title = match.title;
-        amount = match.amount;
-        categoryId = match.categoryId;
-        break;
+    if (shortcutKey.startsWith('debt_reminder:')) {
+      final parts = shortcutKey.split(':');
+      final parsedAmount = parts.length > 1 ? (double.tryParse(parts[1]) ?? 200.0) : 200.0;
+      final parsedPhrase = parts.length > 2 ? parts[2] : 'скинь 200 сом';
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          AddTransactionModal.show(
+            context,
+            widget.controller,
+            defaultType: TransactionType.income,
+            initialAmount: parsedAmount,
+            initialTitle: 'Возврат долга / перевод',
+            initialNote: 'Из переписки: «$parsedPhrase»',
+          );
+        }
+      });
+      return;
     }
+
+    if (shortcutKey.startsWith('shortcut_dynamic:')) {
+      final parts = shortcutKey.split(':');
+      if (parts.length >= 5) {
+        final idx = int.tryParse(parts[1]);
+        final parsedTitle = parts[2];
+        final parsedAmount = double.tryParse(parts[3]) ?? 0.0;
+        final parsedCat = parts[4];
+
+        if (idx != null &&
+            idx >= 0 &&
+            idx < widget.controller.quickButtonsForWidget.length) {
+          final btn = widget.controller.quickButtonsForWidget[idx];
+          title = btn.title;
+          amount = btn.amount;
+          categoryId = btn.categoryId;
+        } else if (parsedTitle.isNotEmpty && parsedAmount > 0) {
+          title = parsedTitle;
+          amount = parsedAmount;
+          categoryId = parsedCat.isNotEmpty ? parsedCat : 'cat_restaurants';
+        }
+      }
+    } else {
+      switch (shortcutKey) {
+        case 'marshrutka':
+          title = 'Маршрутка';
+          amount = 25.0;
+          categoryId = 'cat_transport';
+          break;
+        case 'coffee':
+          title = 'Кофе';
+          amount = 150.0;
+          categoryId = 'cat_restaurants';
+          break;
+        case 'lunch':
+          title = 'Обед';
+          amount = 350.0;
+          categoryId = 'cat_restaurants';
+          break;
+        case 'taxi':
+          title = 'Такси';
+          amount = 180.0;
+          categoryId = 'cat_transport';
+          break;
+        default:
+          final match = widget.controller.quickShortcuts.firstWhere(
+            (s) => s.id == shortcutKey || s.title.toLowerCase().contains(shortcutKey),
+            orElse: () => widget.controller.quickShortcuts.isNotEmpty
+                ? widget.controller.quickShortcuts.first
+                : QuickPaymentShortcut(
+                    id: 'q_default',
+                    title: 'Быстрый расход',
+                    amount: 50.0,
+                    categoryId: 'cat_restaurants',
+                    accountId: 'acc_mbank',
+                    icon: Icons.bolt_rounded,
+                    color: const Color(0xFFFF9F0A),
+                  ),
+          );
+          title = match.title;
+          amount = match.amount;
+          categoryId = match.categoryId;
+          break;
+      }
+    }
+
+    if (amount <= 0) return;
 
     HapticFeedback.heavyImpact();
     final targetAccount = widget.controller.accounts.isNotEmpty
@@ -349,6 +592,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       final decoded = jsonDecode(rawPending);
       if (decoded is List && decoded.isNotEmpty) {
         int importedCount = 0;
+        final Set<String> batchSeenSignatures = {};
         for (final item in decoded) {
           if (item is Map) {
             final title = item['title'] as String? ?? '';
@@ -366,6 +610,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
             final parsed = MBankParserService.parse(fullText);
             if (parsed != null) {
+              if (parsed.isBalanceOnly) {
+                if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
+                  widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+                }
+                continue;
+              }
+
+              // Deduplicate within the same pending batch (e.g. screen receipt + push notification for same purchase)
+              final batchSig = '${parsed.amount.toStringAsFixed(2)}_${parsed.type.name}';
+              if (batchSeenSignatures.contains(batchSig)) {
+                if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
+                  widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+                }
+                continue;
+              }
+              batchSeenSignatures.add(batchSig);
+
               widget.controller.addMBankAutoTransaction(
                 title: parsed.title,
                 amount: parsed.amount,

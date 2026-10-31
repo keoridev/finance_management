@@ -165,4 +165,101 @@ void main() {
     // Must NOT create a duplicate record
     expect(controller.transactions.length, initialTxCount + 1);
   });
+
+  test('Transaction Archive: Deleting moves to archive, restoring recalculates balance', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    await DatabaseService.instance.clearAll();
+
+    final controller = FinanceController();
+    await controller.loadFromStorage();
+    controller.updateAccountBalance('acc_mbank', 10000.0);
+
+    // Add an expense: 1200 сом in Faiza
+    controller.addTransaction(
+      title: 'Обед в Фаизе',
+      amount: 1200.0,
+      date: DateTime.now(),
+      type: TransactionType.expense,
+      categoryId: 'cat_restaurants',
+      accountId: 'acc_mbank',
+    );
+
+    expect(controller.getAccountById('acc_mbank')!.balance, 8800.0);
+    final tx = controller.transactions.firstWhere((t) => t.title == 'Обед в Фаизе');
+
+    // 1. Swipe/Delete moves to archive:
+    controller.deleteTransaction(tx.id);
+
+    // Balance is reversed back to 10000.0 som
+    expect(controller.getAccountById('acc_mbank')!.balance, 10000.0);
+    expect(controller.transactions.any((t) => t.id == tx.id), isFalse);
+    expect(controller.archivedTransactions.any((t) => t.id == tx.id), isTrue);
+    expect(controller.archivedCount, 1);
+
+    // 2. Restore transaction back from archive:
+    controller.restoreTransaction(tx.id);
+
+    // Balance is re-deducted to 8800.0 som
+    expect(controller.getAccountById('acc_mbank')!.balance, 8800.0);
+    expect(controller.transactions.any((t) => t.id == tx.id), isTrue);
+    expect(controller.archivedTransactions.any((t) => t.id == tx.id), isFalse);
+    expect(controller.archivedCount, 0);
+
+    // 3. Delete again and permanently delete:
+    controller.deleteTransaction(tx.id);
+    expect(controller.archivedCount, 1);
+    controller.permanentlyDeleteTransaction(tx.id);
+    expect(controller.archivedCount, 0);
+    expect(controller.transactions.any((t) => t.id == tx.id), isFalse);
+  });
+
+  test('Archived Transactions Persistence across StorageService save and load', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    await DatabaseService.instance.clearAll();
+
+    final acc = Account(
+      id: 'acc_mbank',
+      name: 'MBank',
+      bankName: 'MBank',
+      lastDigits: '4820',
+      balance: 20000.0,
+      currency: 'сом',
+      type: AccountType.card,
+      color: const Color(0xFF0A84FF),
+    );
+
+    final archivedTx = Transaction(
+      id: 'tx_archived_1',
+      title: 'Удаленный кофе',
+      amount: 250.0,
+      date: DateTime.now(),
+      type: TransactionType.expense,
+      categoryId: 'cat_restaurants',
+      accountId: 'acc_mbank',
+      note: 'Случайно удалил',
+    );
+
+    await StorageService.saveAll(
+      accounts: [acc],
+      transactions: [],
+      archivedTransactions: [archivedTx],
+      categories: TransactionCategory.defaultCategories,
+      budgets: [],
+      savingsGoals: [],
+      recurringPayments: [],
+      shortcuts: [],
+      noSpendStreak: 3,
+      lastWinterCheckInDate: DateTime.now(),
+      winterShields: 1,
+    );
+
+    final loaded = await StorageService.loadAll();
+    expect(loaded, isNotNull);
+    final loadedArchived = loaded!['archivedTransactions'] as List;
+    expect(loadedArchived.length, 1);
+    expect((loadedArchived.first as Transaction).title, 'Удаленный кофе');
+    expect((loadedArchived.first as Transaction).amount, 250.0);
+  });
 }

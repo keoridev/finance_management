@@ -11,6 +11,7 @@ import '../models/transaction.dart';
 import '../models/transaction_category.dart';
 import '../models/transaction_type.dart';
 import '../models/workout_penalty.dart';
+import '../services/merchant_memory_service.dart';
 import '../services/storage_service.dart';
 import '../services/widget_launch_service.dart';
 import '../utils/formatters.dart';
@@ -37,11 +38,15 @@ class FinanceController extends ChangeNotifier {
   late List<QuickPaymentShortcut> _quickShortcuts;
   late List<SavingsGoal> _savingsGoals;
   int _noSpendStreak = 0;
+  List<Transaction> _archivedTransactions = [];
 
-  bool _smartRoundUpEnabled = true;
+  bool _smartRoundUpEnabled = false;
   int _smartRoundUpStep = 100;
   double? _lastRoundUpAmount;
   String? _lastRoundUpGoalTitle;
+  bool _capybaraFilterEnabled = false;
+  bool _floatingCapyEnabled = false;
+  bool _capybaraWidgetEnabled = true;
   WorkoutPenalty? _activeWorkoutPenalty;
 
   PeriodFilter _selectedPeriod = PeriodFilter.thisMonth;
@@ -57,6 +62,8 @@ class FinanceController extends ChangeNotifier {
   // Getters
   List<Account> get accounts => List.unmodifiable(_accounts);
   List<Transaction> get transactions => List.unmodifiable(_transactions);
+  List<Transaction> get archivedTransactions => List.unmodifiable(_archivedTransactions);
+  int get archivedCount => _archivedTransactions.length;
   List<TransactionCategory> get categories => List.unmodifiable(_categories);
   List<CategoryBudget> get budgets => List.unmodifiable(_budgets);
   List<CurrencyRate> get currencyRates => List.unmodifiable(_currencyRates);
@@ -64,6 +71,99 @@ class FinanceController extends ChangeNotifier {
       List.unmodifiable(_recurringPayments);
   List<QuickPaymentShortcut> get quickShortcuts =>
       List.unmodifiable(_quickShortcuts);
+
+  /// Dynamically computes the 4 quick buttons for home screen widgets & previews,
+  /// prioritizing the user's most recently entered payments and custom shortcuts.
+  List<QuickPaymentShortcut> get quickButtonsForWidget {
+    final List<QuickPaymentShortcut> result = [];
+    final Set<String> seenTitles = {};
+
+    // 1. Take quick shortcuts (user-configured or recently entered)
+    for (final s in _quickShortcuts) {
+      final normTitle = s.title.toLowerCase().trim();
+      if (!seenTitles.contains(normTitle) && s.amount > 0) {
+        seenTitles.add(normTitle);
+        result.add(s);
+      }
+      if (result.length >= 4) return result;
+    }
+
+    // 2. Supplement with unique recent expense transactions
+    for (final t in _transactions) {
+      if (t.type != TransactionType.expense || t.amount <= 0 || t.title.trim().isEmpty) {
+        continue;
+      }
+      final normTitle = t.title.toLowerCase().trim();
+      if (!seenTitles.contains(normTitle)) {
+        seenTitles.add(normTitle);
+        final cat = getCategoryById(t.categoryId);
+        result.add(
+          QuickPaymentShortcut(
+            id: 'q_recent_${t.id}',
+            title: t.title.trim(),
+            amount: t.amount,
+            categoryId: t.categoryId,
+            accountId: t.accountId,
+            icon: cat?.icon ?? Icons.bolt_rounded,
+            color: cat?.color ?? const Color(0xFFFF9F0A),
+          ),
+        );
+      }
+      if (result.length >= 4) return result;
+    }
+
+    // 3. Fallback to classic defaults if fewer than 4
+    final defaults = [
+      const QuickPaymentShortcut(
+        id: 'q_default_marshrutka',
+        title: 'Маршрутка',
+        amount: 25.0,
+        categoryId: 'cat_transport',
+        accountId: 'acc_mbank',
+        icon: Icons.airport_shuttle_rounded,
+        color: Color(0xFF0A84FF),
+      ),
+      const QuickPaymentShortcut(
+        id: 'q_default_coffee',
+        title: 'Кофе',
+        amount: 150.0,
+        categoryId: 'cat_restaurants',
+        accountId: 'acc_mbank',
+        icon: Icons.coffee_rounded,
+        color: Color(0xFFFF9F0A),
+      ),
+      const QuickPaymentShortcut(
+        id: 'q_default_lunch',
+        title: 'Обед',
+        amount: 350.0,
+        categoryId: 'cat_restaurants',
+        accountId: 'acc_mbank',
+        icon: Icons.restaurant_rounded,
+        color: Color(0xFFFF453A),
+      ),
+      const QuickPaymentShortcut(
+        id: 'q_default_taxi',
+        title: 'Такси',
+        amount: 180.0,
+        categoryId: 'cat_transport',
+        accountId: 'acc_mbank',
+        icon: Icons.local_taxi_rounded,
+        color: Color(0xFFFFD60A),
+      ),
+    ];
+
+    for (final def in defaults) {
+      final normTitle = def.title.toLowerCase().trim();
+      if (!seenTitles.contains(normTitle)) {
+        seenTitles.add(normTitle);
+        result.add(def);
+      }
+      if (result.length >= 4) break;
+    }
+
+    return result;
+  }
+
   List<SavingsGoal> get savingsGoals => List.unmodifiable(_savingsGoals);
   int get noSpendStreak => _noSpendStreak;
   bool get isLoading => _isLoading;
@@ -72,6 +172,9 @@ class FinanceController extends ChangeNotifier {
   int get smartRoundUpStep => _smartRoundUpStep;
   double? get lastRoundUpAmount => _lastRoundUpAmount;
   String? get lastRoundUpGoalTitle => _lastRoundUpGoalTitle;
+  bool get capybaraFilterEnabled => _capybaraFilterEnabled;
+  bool get floatingCapyEnabled => _floatingCapyEnabled;
+  bool get capybaraWidgetEnabled => _capybaraWidgetEnabled;
   WorkoutPenalty? get activeWorkoutPenalty => _activeWorkoutPenalty;
   bool get isSocialBlockerActive => _activeWorkoutPenalty != null;
 
@@ -314,6 +417,7 @@ class FinanceController extends ChangeNotifier {
     required String accountId,
     String? toAccountId,
     String? note,
+    bool isAutoBank = false,
   }) {
     final newTransaction = Transaction(
       id: _generateTxId(),
@@ -345,43 +449,6 @@ class FinanceController extends ChangeNotifier {
 
     _transactions.insert(0, newTransaction);
 
-    // Smart Round-Up logic (e.g. 340 som -> 400 som, diff 60 som sent to MacBook M3 savings goal)
-    if (type == TransactionType.expense &&
-        _smartRoundUpEnabled &&
-        amount > 0 &&
-        categoryId != 'cat_savings' &&
-        _savingsGoals.isNotEmpty) {
-      final remainder =
-          (_smartRoundUpStep - (amount.toInt() % _smartRoundUpStep)) %
-              _smartRoundUpStep;
-      if (remainder > 0) {
-        final roundUpVal = remainder.toDouble();
-        final targetGoal = _savingsGoals.first;
-        _savingsGoals[0] = targetGoal.copyWith(
-          currentAmount: targetGoal.currentAmount + roundUpVal,
-        );
-        _lastRoundUpAmount = roundUpVal;
-        _lastRoundUpGoalTitle = targetGoal.title;
-
-        if (accIndex != -1 && _accounts[accIndex].balance >= roundUpVal) {
-          _accounts[accIndex].balance -= roundUpVal;
-        }
-
-        final roundUpTx = Transaction(
-          id: _generateTxId(),
-          title: 'Умное округление: ${targetGoal.title}',
-          amount: roundUpVal,
-          date: date,
-          type: TransactionType.expense,
-          categoryId: 'cat_savings',
-          accountId: accountId,
-          note:
-              'Округление чека ${CurrencyFormatter.format(amount)} (+$remainder сом в копилку)',
-        );
-        _transactions.insert(1, roundUpTx);
-      }
-    }
-
     // Streetlifting Workout Penalty trigger for Entertainment limit breach
     if (type == TransactionType.expense &&
         categoryId == 'cat_entertainment') {
@@ -407,13 +474,79 @@ class FinanceController extends ChangeNotifier {
       }
     }
 
+    // Dynamically update quick buttons with latest entered expense
+    if (type == TransactionType.expense && amount > 0 && title.trim().isNotEmpty) {
+      _updateQuickShortcutsWithRecentExpense(
+        title: title,
+        amount: amount,
+        categoryId: categoryId,
+        accountId: accountId,
+      );
+    }
+
+    // Intelligently learn merchant -> category association for future auto-categorization
+    if (title.trim().isNotEmpty && categoryId.isNotEmpty) {
+      MerchantMemoryService.learnMerchant(title, categoryId);
+    }
+
+    invalidateCapybaraHealthCache();
     HapticFeedback.mediumImpact();
     _saveToStorage();
     notifyListeners();
   }
 
+  /// Recategorizes an existing transaction and immediately learns the merchant mapping
+  void updateTransactionCategory(String transactionId, String newCategoryId) {
+    final idx = _transactions.indexWhere((t) => t.id == transactionId);
+    if (idx != -1) {
+      final tx = _transactions[idx];
+      _transactions[idx] = tx.copyWith(categoryId: newCategoryId);
+      // Permanently remember that this merchant maps to this new category!
+      MerchantMemoryService.learnMerchant(tx.title, newCategoryId);
+      invalidateCapybaraHealthCache();
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
   void toggleSmartRoundUp(bool value) {
     _smartRoundUpEnabled = value;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('arc_smart_round_up_enabled', value);
+      prefs.setBool('rounding_enabled', value);
+    }).catchError((_) {});
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void toggleCapybaraFilter(bool value) {
+    _capybaraFilterEnabled = value;
+    final dreamGoal = _savingsGoals.isNotEmpty ? _savingsGoals.first.title : 'MacBook Pro M3';
+    final remaining = _savingsGoals.isNotEmpty
+        ? (_savingsGoals.first.targetAmount - _savingsGoals.first.currentAmount).clamp(0.0, 99999999.0)
+        : 120000.0;
+    WidgetLaunchService.syncCapybaraFilterConfig(
+      enabled: value,
+      threshold: 500.0,
+      dreamGoal: dreamGoal,
+      remainingGoal: remaining,
+    );
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void toggleFloatingCapy(bool value) {
+    _floatingCapyEnabled = value;
+    WidgetLaunchService.syncFloatingCapyConfig(enabled: value);
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void toggleCapybaraWidget(bool value) {
+    _capybaraWidgetEnabled = value;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('arc_capybara_widget_enabled', value);
+    }).catchError((_) {});
     _saveToStorage();
     notifyListeners();
   }
@@ -453,7 +586,7 @@ class FinanceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void deleteTransaction(String id) {
+  void deleteTransaction(String id, {bool moveToArchive = true}) {
     final index = _transactions.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
@@ -476,7 +609,64 @@ class FinanceController extends ChangeNotifier {
     }
 
     _transactions.removeAt(index);
+    if (moveToArchive) {
+      _archivedTransactions.removeWhere((t) => t.id == tx.id);
+      _archivedTransactions.insert(0, tx);
+    }
     HapticFeedback.mediumImpact();
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  /// Restores an archived/deleted transaction back to active history,
+  /// re-applying its financial balance change to the corresponding account.
+  void restoreTransaction(String id) {
+    final index = _archivedTransactions.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+
+    final tx = _archivedTransactions[index];
+
+    // Find account to re-apply balance impact
+    int accIndex = _accounts.indexWhere((a) => a.id == tx.accountId);
+    if (accIndex == -1 && _accounts.isNotEmpty) {
+      accIndex = 0; // fallback if account was removed
+    }
+
+    if (accIndex != -1) {
+      if (tx.type == TransactionType.expense) {
+        _accounts[accIndex].balance -= tx.amount;
+      } else if (tx.type == TransactionType.income) {
+        _accounts[accIndex].balance += tx.amount;
+      } else if (tx.type == TransactionType.transfer &&
+          tx.toAccountId != null) {
+        _accounts[accIndex].balance -= tx.amount;
+        final toAccIndex = _accounts.indexWhere((a) => a.id == tx.toAccountId);
+        if (toAccIndex != -1) {
+          _accounts[toAccIndex].balance += tx.amount;
+        }
+      }
+    }
+
+    _archivedTransactions.removeAt(index);
+    _transactions.add(tx);
+    _transactions.sort((a, b) => b.date.compareTo(a.date));
+    HapticFeedback.mediumImpact();
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  /// Permanently removes a transaction from archive (cannot be restored)
+  void permanentlyDeleteTransaction(String id) {
+    _archivedTransactions.removeWhere((t) => t.id == id);
+    HapticFeedback.selectionClick();
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  /// Completely empties the archive of deleted transactions
+  void clearArchive() {
+    _archivedTransactions.clear();
+    HapticFeedback.heavyImpact();
     _saveToStorage();
     notifyListeners();
   }
@@ -621,6 +811,54 @@ class FinanceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _updateQuickShortcutsWithRecentExpense({
+    required String title,
+    required double amount,
+    required String categoryId,
+    required String accountId,
+  }) {
+    final cleanTitle = title.trim();
+    if (cleanTitle.isEmpty || amount <= 0) return;
+
+    final existingIdx = _quickShortcuts.indexWhere(
+      (s) => s.title.toLowerCase().trim() == cleanTitle.toLowerCase(),
+    );
+
+    final cat = getCategoryById(categoryId);
+    final icon = cat?.icon ?? Icons.bolt_rounded;
+    final color = cat?.color ?? const Color(0xFFFF9F0A);
+
+    if (existingIdx != -1) {
+      final existing = _quickShortcuts.removeAt(existingIdx);
+      _quickShortcuts.insert(
+        0,
+        existing.copyWith(
+          amount: amount,
+          categoryId: categoryId,
+          accountId: accountId,
+          icon: icon,
+          color: color,
+        ),
+      );
+    } else {
+      _quickShortcuts.insert(
+        0,
+        QuickPaymentShortcut(
+          id: 'q_last_${DateTime.now().millisecondsSinceEpoch}',
+          title: cleanTitle,
+          amount: amount,
+          categoryId: categoryId,
+          accountId: accountId,
+          icon: icon,
+          color: color,
+        ),
+      );
+      if (_quickShortcuts.length > 10) {
+        _quickShortcuts = _quickShortcuts.sublist(0, 10);
+      }
+    }
+  }
+
   // Quick Payment Shortcuts Actions
   void addQuickShortcut({
     required String title,
@@ -639,7 +877,7 @@ class FinanceController extends ChangeNotifier {
       icon: icon,
       color: color,
     );
-    _quickShortcuts.add(shortcut);
+    _quickShortcuts.insert(0, shortcut);
     _saveToStorage();
     notifyListeners();
   }
@@ -870,8 +1108,23 @@ class FinanceController extends ChangeNotifier {
     return _dailyDisciplineSteps;
   }
 
-  // Capybara Health & Spending-Dependent States
+  // Capybara Health & Spending-Dependent States (Optimized with high-performance memoization)
+  int? _cachedCapybaraHealth;
+  DateTime? _lastCapybaraHealthCalcTime;
+
+  void invalidateCapybaraHealthCache() {
+    _cachedCapybaraHealth = null;
+    _lastCapybaraHealthCalcTime = null;
+  }
+
   int get capybaraHealth {
+    final now = DateTime.now();
+    if (_cachedCapybaraHealth != null &&
+        _lastCapybaraHealthCalcTime != null &&
+        now.difference(_lastCapybaraHealthCalcTime!).inMilliseconds < 1500) {
+      return _cachedCapybaraHealth!;
+    }
+
     int score = 80;
     // 1. Balance impact
     if (totalBalance <= 0) {
@@ -889,25 +1142,30 @@ class FinanceController extends ChangeNotifier {
       score += 15;
     }
 
-    // 3. Today's rapid spending impact
-    final now = DateTime.now();
-    final todayExpenses = _transactions.where(
-      (t) =>
-          t.type == TransactionType.expense &&
+    // 3. Today's rapid spending impact (single pass, early exit)
+    int todayExpenseCount = 0;
+    for (final t in _transactions) {
+      if (t.type == TransactionType.expense &&
           t.date.year == now.year &&
           t.date.month == now.month &&
-          t.date.day == now.day,
-    );
-    if (todayExpenses.length >= 3) {
-      score -= 15;
+          t.date.day == now.day) {
+        todayExpenseCount++;
+        if (todayExpenseCount >= 3) {
+          score -= 15;
+          break;
+        }
+      }
     }
 
     // 4. Exceeded category budgets
-    for (final b in _budgets) {
-      final spent = getCategorySpending(b.categoryId);
-      if (b.monthlyLimit > 0 && spent > b.monthlyLimit) {
-        score -= 20;
-        break;
+    if (_budgets.isNotEmpty) {
+      for (final b in _budgets) {
+        if (b.monthlyLimit <= 0) continue;
+        final spent = getCategorySpending(b.categoryId);
+        if (spent > b.monthlyLimit) {
+          score -= 20;
+          break;
+        }
       }
     }
 
@@ -919,7 +1177,10 @@ class FinanceController extends ChangeNotifier {
       score += 10;
     }
 
-    return score.clamp(5, 100);
+    final computed = score.clamp(5, 100);
+    _cachedCapybaraHealth = computed;
+    _lastCapybaraHealthCalcTime = now;
+    return computed;
   }
 
   CapybaraMoodState get capybaraMood {
@@ -1089,6 +1350,7 @@ class FinanceController extends ChangeNotifier {
 
     // Clean transactions list to start from scratch
     _transactions = [];
+    _archivedTransactions = [];
   }
 
   bool _isStorageLoaded = false;
@@ -1102,6 +1364,9 @@ class FinanceController extends ChangeNotifier {
       }
       if (data['transactions'] != null) {
         _transactions = List<Transaction>.from(data['transactions']);
+      }
+      if (data['archivedTransactions'] != null) {
+        _archivedTransactions = List<Transaction>.from(data['archivedTransactions']);
       }
       if (data['categories'] != null && (data['categories'] as List).isNotEmpty) {
         _categories = List<TransactionCategory>.from(data['categories']);
@@ -1135,8 +1400,13 @@ class FinanceController extends ChangeNotifier {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      _smartRoundUpEnabled = prefs.getBool('arc_smart_round_up_enabled') ?? true;
+      _smartRoundUpEnabled = prefs.getBool('arc_smart_round_up_enabled') ??
+          prefs.getBool('rounding_enabled') ??
+          false;
       _smartRoundUpStep = prefs.getInt('arc_smart_round_up_step') ?? 100;
+      _capybaraFilterEnabled = prefs.getBool('arc_capybara_filter_enabled') ?? false;
+      _floatingCapyEnabled = prefs.getBool('arc_floating_capy_enabled') ?? false;
+      _capybaraWidgetEnabled = prefs.getBool('arc_capybara_widget_enabled') ?? true;
     } catch (_) {}
 
     _isStorageLoaded = true;
@@ -1154,6 +1424,7 @@ class FinanceController extends ChangeNotifier {
       isWinterChecked: isWinterCheckedToday,
       accountName: activeAccountLabel,
       todaySpent: todaySpentLabel,
+      quickButtons: quickButtonsForWidget,
     );
   }
 
@@ -1176,7 +1447,7 @@ class FinanceController extends ChangeNotifier {
     return 'Сегодня: −${CurrencyFormatter.format(exp)}';
   }
 
-  void addMBankAutoTransaction({
+  bool addMBankAutoTransaction({
     required String title,
     required double amount,
     required TransactionType type,
@@ -1192,13 +1463,33 @@ class FinanceController extends ChangeNotifier {
         ? _accounts[mbankIndex].id
         : (_accounts.isNotEmpty ? _accounts.first.id : 'acc_mbank');
 
-    // Strict Deduplication: Prevent duplicate recordings (e.g. push notification + accessibility screen receipt)
+    // Strict Multi-Layer Deduplication: Prevent duplicate recordings (e.g. push notification + accessibility screen receipt)
     final now = DateTime.now();
     final hasRecentDuplicate = _transactions.any((tx) {
       final isSameAmount = (tx.amount - amount).abs() < 0.01;
       final isSameType = tx.type == type;
-      final isWithinWindow = now.difference(tx.date).inSeconds.abs() < 180; // 3 minutes
-      return isSameAmount && isSameType && isWithinWindow;
+      if (!isSameAmount || !isSameType) return false;
+
+      // 1. Any matching transaction within 60 minutes
+      if (now.difference(tx.date).inSeconds.abs() < 3600) {
+        return true;
+      }
+
+      // 2. Same calendar day with matching title or bank auto-sync note
+      final isSameDay = tx.date.year == now.year &&
+          tx.date.month == now.month &&
+          tx.date.day == now.day;
+      if (isSameDay) {
+        final t1 = tx.title.toLowerCase().trim();
+        final t2 = title.toLowerCase().trim();
+        if (t1 == t2 ||
+            t1.contains(t2) ||
+            t2.contains(t1) ||
+            (tx.note?.contains('MBank') == true && (note?.contains('MBank') == true))) {
+          return true;
+        }
+      }
+      return false;
     });
 
     if (hasRecentDuplicate) {
@@ -1208,7 +1499,7 @@ class FinanceController extends ChangeNotifier {
         _saveToStorage();
         notifyListeners();
       }
-      return;
+      return false;
     }
 
     final catId = categoryId ??
@@ -1222,14 +1513,20 @@ class FinanceController extends ChangeNotifier {
       categoryId: catId,
       accountId: targetAccountId,
       note: note ?? 'Автоматически из уведомления MBank',
+      isAutoBank: true,
     );
 
-    // If bank notification explicitly stated current balance, sync it safely
-    if (balanceAfter != null && balanceAfter > 0 && mbankIndex != -1) {
-      _accounts[mbankIndex] = _accounts[mbankIndex].copyWith(balance: balanceAfter);
-      _saveToStorage();
-      notifyListeners();
+    // If bank notification explicitly stated current balance and it differs, update it cleanly
+    if (balanceAfter != null && balanceAfter > 0) {
+      final targetIdx = mbankIndex != -1 ? mbankIndex : (_accounts.isNotEmpty ? 0 : -1);
+      if (targetIdx != -1 && (_accounts[targetIdx].balance - balanceAfter).abs() > 0.01) {
+        _accounts[targetIdx] = _accounts[targetIdx].copyWith(balance: balanceAfter);
+        invalidateCapybaraHealthCache();
+        _saveToStorage();
+        notifyListeners();
+      }
     }
+    return true;
   }
 
   bool updateScrapedBankBalance(String bankName, double newBalance) {
@@ -1240,7 +1537,12 @@ class FinanceController extends ChangeNotifier {
     if (idx == -1 && lower.contains('mbank')) {
       idx = _accounts.indexWhere((a) => a.id == 'acc_mbank');
     }
-    if (idx == -1) return false; // Never fallback to arbitrary account
+    // Fallback: If bank is MBank/primary card and user renamed account, use primary card account
+    if (idx == -1 && _accounts.isNotEmpty) {
+      final cardIdx = _accounts.indexWhere((a) => a.type == AccountType.card);
+      idx = cardIdx != -1 ? cardIdx : 0;
+    }
+    if (idx == -1) return false;
 
     final currentBal = _accounts[idx].balance;
     // Safety guard: If current balance > 1000 and new balance drops by more than 90% without a transaction,
@@ -1252,6 +1554,14 @@ class FinanceController extends ChangeNotifier {
 
     _accounts[idx] = _accounts[idx].copyWith(balance: newBalance);
     _saveToStorage();
+    WidgetLaunchService.syncBalanceToWidget(
+      totalBalance,
+      streak: _noSpendStreak,
+      isWinterChecked: isWinterCheckedToday,
+      accountName: activeAccountLabel,
+      todaySpent: todaySpentLabel,
+      quickButtons: quickButtonsForWidget,
+    );
     notifyListeners();
     return true;
   }
@@ -1268,6 +1578,7 @@ class FinanceController extends ChangeNotifier {
     StorageService.saveAll(
       accounts: _accounts,
       transactions: _transactions,
+      archivedTransactions: _archivedTransactions,
       categories: _categories,
       budgets: _budgets,
       savingsGoals: _savingsGoals,
@@ -1283,6 +1594,7 @@ class FinanceController extends ChangeNotifier {
       isWinterChecked: isWinterCheckedToday,
       accountName: activeAccountLabel,
       todaySpent: todaySpentLabel,
+      quickButtons: quickButtonsForWidget,
     );
 
     // Sync active dream goal & threshold to Android Capybara Pre-Transaction filter
@@ -1291,10 +1603,13 @@ class FinanceController extends ChangeNotifier {
         ? (_savingsGoals.first.targetAmount - _savingsGoals.first.currentAmount).clamp(0.0, 99999999.0)
         : 120000.0;
     WidgetLaunchService.syncCapybaraFilterConfig(
-      enabled: true,
+      enabled: _capybaraFilterEnabled,
       threshold: 500.0,
       dreamGoal: dreamGoal,
       remainingGoal: remaining,
+    );
+    WidgetLaunchService.syncFloatingCapyConfig(
+      enabled: _floatingCapyEnabled,
     );
 
     final hasActivePenalty = _activeWorkoutPenalty != null && !_activeWorkoutPenalty!.isCompleted;
@@ -1307,7 +1622,11 @@ class FinanceController extends ChangeNotifier {
 
     SharedPreferences.getInstance().then((prefs) {
       prefs.setBool('arc_smart_round_up_enabled', _smartRoundUpEnabled);
+      prefs.setBool('rounding_enabled', _smartRoundUpEnabled);
       prefs.setInt('arc_smart_round_up_step', _smartRoundUpStep);
+      prefs.setBool('arc_capybara_filter_enabled', _capybaraFilterEnabled);
+      prefs.setBool('arc_floating_capy_enabled', _floatingCapyEnabled);
+      prefs.setBool('arc_capybara_widget_enabled', _capybaraWidgetEnabled);
     }).catchError((_) {});
   }
 }

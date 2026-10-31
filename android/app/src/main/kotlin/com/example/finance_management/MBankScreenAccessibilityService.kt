@@ -1,6 +1,8 @@
 package com.example.finance_management
 
 import android.accessibilityservice.AccessibilityService
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -65,6 +67,15 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         @Volatile
         var isServiceRunning = false
+
+        @Volatile
+        var instance: MBankScreenAccessibilityService? = null
+
+        fun dismissFloatingBubbleIfRunning() {
+            instance?.let { service ->
+                service.mainHandler.post { service.hideFloatingBubble() }
+            }
+        }
     }
 
     private var lastProcessTimestamp = 0L
@@ -79,6 +90,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         isServiceRunning = true
+        instance = this
         Log.i(TAG, "MBankScreenAccessibilityService connected and ready")
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -108,6 +120,23 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                     handleSocialAppBlocked(packageNameStr)
                     return
                 }
+            } else {
+                if (socialBlockerOverlayView != null && !isTransientSystemPackage(packageNameStr)) {
+                    mainHandler.post { dismissSocialBlockerOverlay() }
+                }
+            }
+
+            // Ignore transient system UI packages (keyboard, system UI, biometric, launcher search)
+            // so they don't hide the floating Capybara bubble while inside a banking app!
+            if (isTransientSystemPackage(packageNameStr)) {
+                return
+            }
+
+            // Check Messenger apps for transfer/debt mentions (e.g. "скинь 200 сом", "переведи 500")
+            if (isMessengerApp(packageNameStr)) {
+                mainHandler.post { hideFloatingBubble() }
+                handleMessengerChatScan(event, packageNameStr)
+                return
             }
 
             // Target bank apps or marketplaces
@@ -130,10 +159,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             lastProcessTimestamp = now
 
-            // Extract visible text hierarchy
+            // Extract visible text hierarchy (optimized to 60 nodes for fast IPC traversal)
             val rootNode = rootInActiveWindow ?: event.source ?: return
             val texts = mutableListOf<String>()
-            extractVisibleTexts(rootNode, texts, 0, 160)
+            extractVisibleTexts(rootNode, texts, 0, 60)
 
             if (texts.isEmpty()) return
 
@@ -162,6 +191,113 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun isTransientSystemPackage(pkg: String): Boolean {
+        if (pkg.isEmpty()) return true
+        val lower = pkg.lowercase(Locale.ROOT)
+        return lower == "android" ||
+                lower.contains("systemui") ||
+                lower.contains("inputmethod") ||
+                lower.contains("keyboard") ||
+                lower.contains("latin") ||
+                lower.contains("gboard") ||
+                lower.contains("swiftkey") ||
+                lower.contains("samsung.ime") ||
+                lower.contains("biometric") ||
+                lower.contains("credentials") ||
+                lower.contains("autofill") ||
+                lower.contains("permissioncontroller")
+    }
+
+    private fun isMessengerApp(pkg: String): Boolean {
+        val lower = pkg.lowercase(Locale.ROOT)
+        return lower.contains("whatsapp") ||
+                lower.contains("telegram") ||
+                lower.contains("challegram") ||
+                lower.contains("plus.messenger") ||
+                lower.contains("messaging") ||
+                lower.contains("mms") ||
+                lower.contains("sms")
+    }
+
+    private var lastMessengerScanTime = 0L
+    private val scheduledDebtReminders = mutableMapOf<String, Long>()
+
+    private fun handleMessengerChatScan(event: AccessibilityEvent, pkg: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastMessengerScanTime < 600) return
+        lastMessengerScanTime = now
+
+        val rootNode = rootInActiveWindow ?: event.source ?: return
+        val texts = mutableListOf<String>()
+        extractVisibleTexts(rootNode, texts, 0, 40)
+        if (texts.isEmpty()) return
+
+        // Pattern matching transfer/debt mentions like:
+        // "скинь 200 сом", "скинь 200", "переведи 500 сом", "закинь 1000", "скинул 300 сом", "верни 200"
+        val debtPattern = Pattern.compile(
+            "(?:скинь|переведи|закинь|скинул|перевел|отправь|верни|одолжи|займи)\\s*(?:мне|нам|на\\s+мбанк|на\\s+mbank)?\\s*(\\d{1,5})\\s*(?:сом|c|с|kgs)?",
+            Pattern.CASE_INSENSITIVE
+        )
+
+        for (text in texts) {
+            val matcher = debtPattern.matcher(text)
+            if (matcher.find()) {
+                val amountStr = matcher.group(1) ?: continue
+                val amount = amountStr.toDoubleOrNull() ?: continue
+                if (amount <= 0 || amount > 100_000) continue
+
+                val matchedPhrase = matcher.group(0)?.trim() ?: "скинь $amountStr сом"
+                val signature = "${amount.toInt()}_${matchedPhrase.lowercase(Locale.ROOT)}"
+
+                // Rate-limit: don't schedule multiple alarms for the same phrase within 30 minutes
+                val lastScheduled = scheduledDebtReminders[signature]
+                if (lastScheduled != null && now - lastScheduled < 30 * 60 * 1000L) {
+                    continue
+                }
+                scheduledDebtReminders[signature] = now
+
+                Log.i(TAG, "Messenger debt/transfer detected: '$matchedPhrase' ($amount SOM). Scheduling 15-minute reminder.")
+
+                // Schedule alarm in 15 minutes (900 seconds)
+                try {
+                    val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                    val alarmId = (now % 100000).toInt() + 7000
+                    val intent = Intent(this, AlarmReceiver::class.java).apply {
+                        putExtra("id", alarmId)
+                        putExtra("title", "Капибара помнит: ${amount.toInt()} сом")
+                        putExtra("body", "15 минут назад в переписке было: «$matchedPhrase». Деньги пришли? Запишите в доходы или долг.")
+                        putExtra("quick_action", "debt_reminder:${amount.toInt()}:$matchedPhrase")
+                    }
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        this,
+                        alarmId,
+                        intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    val triggerAt = now + (15 * 60 * 1000L) // 15 minutes!
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                    } else {
+                        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                    }
+
+                    mainHandler.post {
+                        try {
+                            Toast.makeText(
+                                applicationContext,
+                                "ARC Finance: Капибара напомнит через 15 минут записать ${amount.toInt()} сом",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to schedule messenger debt reminder: ${e.message}", e)
+                }
+                break
+            }
+        }
+    }
+
     private fun isTargetApp(pkg: String): Boolean {
         return isTargetBankingApp(pkg) || isTargetMarketplaceApp(pkg)
     }
@@ -175,10 +311,14 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 pkg.contains("finca") ||
                 pkg.contains("keremet") ||
                 pkg.contains("companion") ||
+                pkg.contains("kompanion") ||
+                pkg.contains("rsk") ||
+                pkg.contains("eldik") ||
                 pkg.contains("faktura") ||
                 pkg.contains("o.dengi") ||
                 pkg.contains("megapay") ||
-                pkg.contains("balance.kg")
+                pkg.contains("balance.kg") ||
+                pkg.contains("balance")
     }
 
     private fun isTargetMarketplaceApp(pkg: String): Boolean {
@@ -197,7 +337,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         depth: Int,
         maxNodes: Int
     ) {
-        if (node == null || result.size >= maxNodes || depth > 15) return
+        if (node == null || result.size >= maxNodes || depth > 8) return
 
         val text = node.text?.toString()?.trim()
         if (!text.isNullOrEmpty() && text.length > 1) {
@@ -259,9 +399,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         // Remaining balance if visible
         val balanceAfter = extractBalanceAfter(fullCombined)
 
-        // Deduplication
+        // Deduplication: prevent multiple accessibility events from the same receipt
         val cleanAmount = String.format(Locale.US, "%.2f", amount)
-        val signature = "${cleanAmount}_${title}_${if (isIncome) "in" else "out"}"
+        val signature = "${cleanAmount}_${if (isIncome) "in" else "out"}"
         val currentTime = System.currentTimeMillis()
 
         cleanUpOldSignatures(currentTime)
@@ -343,7 +483,11 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         // Read user config from SharedPreferences
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val isFilterEnabled = prefs.getBoolean("flutter.arc_capybara_filter_enabled", true)
+        val isFilterEnabled = if (prefs.contains("flutter.arc_capybara_filter_enabled")) {
+            prefs.getBoolean("flutter.arc_capybara_filter_enabled", false)
+        } else {
+            prefs.getBoolean("arc_capybara_filter_enabled", false)
+        }
         if (!isFilterEnabled) return
 
         val threshold = prefs.getFloat("flutter.arc_capybara_filter_threshold", 500.0f).toDouble()
@@ -367,16 +511,6 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     }
 
     private fun showCapybaraOverlay(amount: Double, dreamGoal: String, remainingGoal: Double) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            // Overlay permission not granted; display instant Toast reminder
-            Toast.makeText(
-                applicationContext,
-                "Капибара: Точно переводим ${amount.toInt()} сом? А как же цель на «$dreamGoal»?",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
         try {
             dismissCapybaraOverlay()
 
@@ -394,7 +528,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 val bg = GradientDrawable().apply {
                     setColor(Color.parseColor("#1C1C1E"))
                     cornerRadius = dpToPx(20).toFloat()
-                    setStroke(dpToPx(1.5f), Color.parseColor("#00C7BE")) // Cupertino Teal accent border
+                    setStroke(dpToPx(1.5f), Color.parseColor("#FF9F0A")) // Capybara Amber accent border
                 }
                 background = bg
                 setPadding(dpToPx(22), dpToPx(20), dpToPx(22), dpToPx(20))
@@ -410,7 +544,22 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             rootLayout.addView(cardContainer, cardParams)
 
-            // 1. Tag Banner
+            // 0. Capybara Avatar & Header
+            val capyHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, dpToPx(10))
+            }
+            val capyAvatar = TextView(this).apply {
+                text = "🦫"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 32f)
+                setPadding(0, 0, dpToPx(10), 0)
+            }
+            capyHeader.addView(capyAvatar)
+
+            val tagAndTitle = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
             val tagText = TextView(this).apply {
                 text = "WINTER ARC • КАПИБАРА-ФИЛЬТР"
                 setTextColor(Color.parseColor("#FF9F0A")) // Amber
@@ -418,22 +567,24 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 typeface = Typeface.DEFAULT_BOLD
                 letterSpacing = 0.08f
             }
-            cardContainer.addView(tagText)
+            tagAndTitle.addView(tagText)
 
-            // 2. Heading
             val titleText = TextView(this).apply {
                 text = "Точно переводим?"
                 setTextColor(Color.WHITE)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
                 typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, dpToPx(4), 0, 0)
+                setPadding(0, dpToPx(2), 0, 0)
             }
-            cardContainer.addView(titleText)
+            tagAndTitle.addView(titleText)
+            capyHeader.addView(tagAndTitle)
+
+            cardContainer.addView(capyHeader)
 
             // 3. Amount
             val amountText = TextView(this).apply {
                 text = "Сумма: ${amount.toInt()} сом"
-                setTextColor(Color.parseColor("#00C7BE"))
+                setTextColor(Color.parseColor("#FF9F0A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 typeface = Typeface.DEFAULT_BOLD
                 setPadding(0, dpToPx(2), 0, dpToPx(10))
@@ -498,7 +649,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
             cardContainer.addView(btnRow)
 
-            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
                 @Suppress("DEPRECATION")
@@ -516,8 +669,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 gravity = Gravity.CENTER
             }
 
-            windowManager.addView(rootLayout, params)
-            activeOverlayView = rootLayout
+            try {
+                windowManager.addView(rootLayout, params)
+                activeOverlayView = rootLayout
+            } catch (e: Exception) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        windowManager.addView(rootLayout, params)
+                        activeOverlayView = rootLayout
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback to TYPE_APPLICATION_OVERLAY also failed: ${e2.message}")
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error displaying Capybara overlay: ${e.message}", e)
         }
@@ -555,7 +720,11 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 fullCombined.contains("главная") ||
                 fullCombined.contains("мой банк") ||
                 fullCombined.contains("доступно") ||
-                fullCombined.contains("баланс")) &&
+                fullCombined.contains("баланс") ||
+                fullCombined.contains("калдык") ||
+                fullCombined.contains("башкы") ||
+                fullCombined.contains("карталар") ||
+                fullCombined.contains("эсеп")) &&
                 !fullCombined.contains("подтвердите") &&
                 !fullCombined.contains("квитанция")
     }
@@ -810,12 +979,15 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 lowerFull.contains("на карте") ||
                 lowerFull.contains("на счету") ||
                 lowerFull.contains("мои карты") ||
-                lowerFull.contains("моя карта")
+                lowerFull.contains("моя карта") ||
+                lowerFull.contains("калдык") ||
+                lowerFull.contains("карталар") ||
+                lowerFull.contains("эсеп")
 
         if (!hasBalanceKeyword) return null
 
         val anchorPattern = Pattern.compile(
-            "(?:баланс|остаток|доступно|на карте|на счету|средств)[:\\s]*([+−\\-]?\\s*\\d{1,3}(?:[\\s\\u00A0]\\d{3})*(?:[.,]\\d{1,2})?)\\s*(?:сом|c|с|kgs|KGS)?",
+            "(?:баланс|остаток|доступно|на карте|на счету|средств|калдык|картадагы калдык)[:\\s]*([+−\\-]?\\s*\\d{1,3}(?:[\\s\\u00A0]\\d{3})*(?:[.,]\\d{1,2})?)\\s*(?:сом|c|с|kgs|KGS)?",
             Pattern.CASE_INSENSITIVE
         )
 
@@ -884,6 +1056,18 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
             val jsonArray = JSONArray(existingJson)
 
+            // Deduplication: Don't add duplicate pending transaction with same amount within 5 minutes
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.optJSONObject(i)
+                if (obj != null) {
+                    val prevAmount = obj.optDouble("amount", 0.0)
+                    val prevTime = obj.optLong("timestamp", 0)
+                    if (Math.abs(prevAmount - amount) < 0.01 && Math.abs(System.currentTimeMillis() - prevTime) < 300_000L) {
+                        return // Already recorded in pending within 5 minutes!
+                    }
+                }
+            }
+
             val newObj = JSONObject().apply {
                 put("title", title)
                 put("body", body)
@@ -917,20 +1101,30 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun showFloatingBubble() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val isEnabled = if (prefs.contains("flutter.arc_floating_capy_enabled")) {
+            prefs.getBoolean("flutter.arc_floating_capy_enabled", true)
+        } else if (prefs.contains("arc_floating_capy_enabled")) {
+            prefs.getBoolean("arc_floating_capy_enabled", true)
+        } else {
+            true
+        }
+        if (!isEnabled) {
+            if (floatingBubbleView != null) {
+                mainHandler.post { hideFloatingBubble() }
+            }
             return
         }
-        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val isEnabled = prefs.getBoolean("flutter.arc_floating_capy_enabled", true)
-        if (!isEnabled) return
 
         if (floatingBubbleView != null) return
 
         try {
             val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val bubbleSize = dpToPx(52)
+            val bubbleSize = dpToPx(60)
 
-            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
                 @Suppress("DEPRECATION")
@@ -954,22 +1148,35 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             val bubble = FrameLayout(this).apply {
                 val bg = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#E61C1C1E")) // Apple Dark Glass
-                    setStroke(dpToPx(2f), Color.parseColor("#00C7BE")) // Cupertino Teal Stroke
+                    setColor(Color.parseColor("#F01C1A17")) // Obsidian Amber Glass
+                    setStroke(dpToPx(2.2f), Color.parseColor("#FF9F0A")) // Capybara Amber Glow
                 }
                 background = bg
-                elevation = dpToPx(12).toFloat()
+                elevation = dpToPx(14).toFloat()
             }
 
-            val capyText = TextView(this).apply {
-                text = "ARC"
-                setTextColor(Color.parseColor("#00C7BE"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            val capyContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+
+            val capyIcon = TextView(this).apply {
+                text = "🦫"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                gravity = Gravity.CENTER
+            }
+            val capyBadge = TextView(this).apply {
+                text = "КАПИ"
+                setTextColor(Color.parseColor("#FF9F0A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 8.5f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
+            capyContent.addView(capyIcon)
+            capyContent.addView(capyBadge)
+
             bubble.addView(
-                capyText,
+                capyContent,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
@@ -1017,8 +1224,21 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 }
             }
 
-            windowManager.addView(bubble, params)
-            floatingBubbleView = bubble
+            try {
+                windowManager.addView(bubble, params)
+                floatingBubbleView = bubble
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add bubble with layoutType $layoutType: ${e.message}")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        windowManager.addView(bubble, params)
+                        floatingBubbleView = bubble
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback to TYPE_APPLICATION_OVERLAY also failed: ${e2.message}")
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing floating bubble: ${e.message}")
         }
@@ -1246,7 +1466,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             sheet.addView(saveBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(44)))
 
-            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
                 @Suppress("DEPRECATION")
@@ -1263,8 +1485,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 gravity = Gravity.CENTER
             }
 
-            windowManager.addView(rootLayout, params)
-            quickEntrySheetView = rootLayout
+            try {
+                windowManager.addView(rootLayout, params)
+                quickEntrySheetView = rootLayout
+            } catch (e: Exception) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        windowManager.addView(rootLayout, params)
+                        quickEntrySheetView = rootLayout
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback to TYPE_APPLICATION_OVERLAY failed for sheet: ${e2.message}")
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error opening quick entry sheet: ${e.message}")
         }
@@ -1285,49 +1519,69 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun isBlockedSocialApp(pkg: String): Boolean {
-        return pkg.contains("instagram") ||
-                pkg.contains("musically") ||
-                pkg.contains("tiktok") ||
-                pkg.contains("youtube") ||
-                pkg.contains("twitter") ||
-                pkg.contains("x.android")
+        val lower = pkg.lowercase(Locale.ROOT)
+        return lower.contains("instagram") ||
+                lower.contains("musically") ||
+                lower.contains("tiktok") ||
+                lower.contains("trill") ||
+                lower.contains("aweme") ||
+                lower.contains("youtube") ||
+                lower.contains("twitter") ||
+                lower.contains("x.android") ||
+                lower.contains("threads") ||
+                lower.contains("facebook") ||
+                lower.contains("snapchat") ||
+                lower.contains("reddit") ||
+                lower.contains("pinterest")
     }
 
     private fun isSocialBlockerActive(): Boolean {
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val isEnabled = prefs.getBoolean("flutter.arc_social_blocker_enabled", true)
+        val isEnabled = if (prefs.contains("flutter.arc_social_blocker_enabled")) {
+            prefs.getBoolean("flutter.arc_social_blocker_enabled", false)
+        } else {
+            prefs.getBoolean("arc_social_blocker_enabled", false)
+        }
         if (!isEnabled) return false
-        return prefs.getBoolean("flutter.arc_social_blocker_active", false)
+
+        val mode = prefs.getString("flutter.arc_social_blocker_mode", null)
+            ?: prefs.getString("arc_social_blocker_mode", "always") ?: "always"
+        if (mode == "always") return true
+
+        return if (prefs.contains("flutter.arc_social_blocker_active")) {
+            prefs.getBoolean("flutter.arc_social_blocker_active", false)
+        } else {
+            prefs.getBoolean("arc_social_blocker_active", false)
+        }
     }
 
     private fun getReadableSocialAppName(pkg: String): String {
         return when {
             pkg.contains("instagram") -> "Instagram"
-            pkg.contains("tiktok") || pkg.contains("musically") -> "TikTok"
+            pkg.contains("tiktok") || pkg.contains("musically") || pkg.contains("trill") || pkg.contains("aweme") -> "TikTok"
             pkg.contains("youtube") -> "YouTube"
             pkg.contains("twitter") || pkg.contains("x.android") -> "X (Twitter)"
+            pkg.contains("threads") -> "Threads"
+            pkg.contains("facebook") -> "Facebook"
+            pkg.contains("snapchat") -> "Snapchat"
+            pkg.contains("reddit") -> "Reddit"
             else -> "Соцсеть"
         }
     }
 
     private fun handleSocialAppBlocked(pkg: String) {
+        if (socialBlockerOverlayView != null) return // Already showing blocker overlay
         val now = System.currentTimeMillis()
-        if (now - lastSocialBlockTimestamp < 2500) return
+        if (now - lastSocialBlockTimestamp < 1500) return
         lastSocialBlockTimestamp = now
 
-        // 1. Kick user immediately to home screen to stop social media usage
-        performGlobalAction(GLOBAL_ACTION_HOME)
-
-        // 2. Show Dictator warning overlay
+        // Present the Capybara Dictator fullscreen blocker overlay directly over the social media app
         mainHandler.post {
             showSocialBlockerOverlay(pkg)
         }
     }
 
     private fun showSocialBlockerOverlay(pkg: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            return
-        }
         if (socialBlockerOverlayView != null) return
 
         try {
@@ -1340,21 +1594,22 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             val appName = getReadableSocialAppName(pkg)
 
             val rootLayout = FrameLayout(this).apply {
-                setBackgroundColor(Color.parseColor("#E6000000"))
+                setBackgroundColor(Color.parseColor("#F50A0A0C")) // Heavy dark backdrop completely covering app
                 setOnClickListener {
                     dismissSocialBlockerOverlay()
+                    performGlobalAction(GLOBAL_ACTION_HOME)
                 }
             }
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 val bg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#141416"))
+                    setColor(Color.parseColor("#151518"))
                     cornerRadius = dpToPx(24).toFloat()
-                    setStroke(dpToPx(2f), Color.parseColor("#FF453A"))
+                    setStroke(dpToPx(2f), Color.parseColor("#FF453A")) // Dictator Crimson Red Border
                 }
                 background = bg
-                setPadding(dpToPx(22), dpToPx(24), dpToPx(22), dpToPx(22))
+                setPadding(dpToPx(22), dpToPx(22), dpToPx(22), dpToPx(22))
                 elevation = dpToPx(24).toFloat()
                 isClickable = true
             }
@@ -1367,6 +1622,35 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             rootLayout.addView(card, cardParams)
 
+            // 0. Capybara Dictator Avatar
+            val avatarContainer = FrameLayout(this).apply {
+                val aBg = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#26FF453A"))
+                    setStroke(dpToPx(2f), Color.parseColor("#FF453A"))
+                }
+                background = aBg
+                elevation = dpToPx(8).toFloat()
+            }
+            val capyIcon = TextView(this).apply {
+                text = "🦫"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
+                gravity = Gravity.CENTER
+            }
+            avatarContainer.addView(capyIcon, FrameLayout.LayoutParams(
+                dpToPx(64),
+                dpToPx(64)
+            ).apply {
+                gravity = Gravity.CENTER
+            })
+            card.addView(avatarContainer, LinearLayout.LayoutParams(
+                dpToPx(64),
+                dpToPx(64)
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = dpToPx(12)
+            })
+
             // 1. Dictator Badge
             val badgeLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1377,41 +1661,51 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                     setStroke(dpToPx(1f), Color.parseColor("#FF453A"))
                 }
                 background = badgeBg
-                setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4))
+                setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
             }
             val badgeText = TextView(this).apply {
-                text = "WINTER ARC DICTATOR • ДОСТУП ЗАКРЫТ"
+                text = "WINTER ARC DICTATOR • СТРОГИЙ РЕЖИМ"
                 setTextColor(Color.parseColor("#FF453A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                 typeface = Typeface.DEFAULT_BOLD
+                letterSpacing = 0.05f
             }
             badgeLayout.addView(badgeText)
-            card.addView(badgeLayout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            card.addView(badgeLayout, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = dpToPx(14)
+                bottomMargin = dpToPx(10)
             })
 
             // 2. Title
             val titleText = TextView(this).apply {
-                text = "ЛИМИТ ПРОБИТ!\n$appName ЗАБЛОКИРОВАН"
+                text = "ЛИМИТ ТРАТ ИСЧЕРПАН!\n$appName ЗАБЛОКИРОВАН"
                 setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
-            card.addView(titleText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            card.addView(titleText, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
                 bottomMargin = dpToPx(10)
             })
 
-            // 3. Toxic Body Message
+            // 3. Strict Mode Message (Direct response to user complaint)
             val bodyText = TextView(this).apply {
-                text = "Лимит трат на сегодня исчерпан! Никаких рилсов, шортсов и тиктоков. Доступ заблокирован, пока не сделаешь $pullups подтягиваний (или 50 отжиманий)."
-                setTextColor(Color.parseColor("#C7C7CC"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                text = "В обычных приложениях можно продлить на 15–20 минут, но здесь строгий режим Winter Arc — никаких отмен и продлений!\n\nДоступ закрыт намертво, пока приложение не удалишь или не сделаешь $pullups подтягиваний (или 50 отжиманий) в ARC Finance."
+                setTextColor(Color.parseColor("#D1D1D6"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                 gravity = Gravity.CENTER
-                setLineSpacing(0f, 1.25f)
+                setLineSpacing(dpToPx(2).toFloat(), 1.15f)
             }
-            card.addView(bodyText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            card.addView(bodyText, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
                 bottomMargin = dpToPx(14)
             })
 
@@ -1421,25 +1715,29 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 val gbg = GradientDrawable().apply {
                     setColor(Color.parseColor("#1C1C1E"))
                     cornerRadius = dpToPx(12).toFloat()
-                    setStroke(dpToPx(1f), Color.parseColor("#2C2C2E"))
+                    setStroke(dpToPx(1f), Color.parseColor("#FF9F0A"))
                 }
                 background = gbg
                 setPadding(dpToPx(12), dpToPx(10), dpToPx(12), dpToPx(10))
             }
             val goalText = TextView(this).apply {
-                text = "Цель накоплений: $dreamGoal\nТелефон заставляет тебя держать дисциплину!"
+                text = "🎯 Главная цель: $dreamGoal\nКапибара заставляет тебя держать дисциплину!"
                 setTextColor(Color.parseColor("#FF9F0A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
             goalBox.addView(goalText)
-            card.addView(goalBox, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dpToPx(20)
+            card.addView(goalBox, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(18)
             })
 
             // 5. Workout Unlock Button
             val unlockBtn = Button(this).apply {
-                text = "ПОДТВЕРДИТЬ $pullups ПОДТЯГИВАНИЙ В ARC"
+                text = "ВЫПОЛНИТЬ $pullups ПОДТЯГИВАНИЙ В ARC"
                 setTextColor(Color.BLACK)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                 typeface = Typeface.DEFAULT_BOLD
@@ -1461,27 +1759,38 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                     }
                 }
             }
-            card.addView(unlockBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(46)).apply {
+            card.addView(unlockBtn, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(46)
+            ).apply {
                 bottomMargin = dpToPx(10)
             })
 
-            // 6. Dismiss Button
+            // 6. Dismiss & Go to Home Screen Button (Exits the blocked social app)
             val closeBtn = Button(this).apply {
-                text = "Убрать телефон (Держать дисциплину)"
-                setTextColor(Color.parseColor("#8E8E93"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                text = "ЗАКРЫТЬ $appName И ВЫЙТИ"
+                setTextColor(Color.parseColor("#EBEBF5"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                typeface = Typeface.DEFAULT_BOLD
                 val cBg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1C1C1E"))
+                    setColor(Color.parseColor("#2C2C2E"))
                     cornerRadius = dpToPx(10).toFloat()
+                    setStroke(dpToPx(1f), Color.parseColor("#3A3A3C"))
                 }
                 background = cBg
                 setOnClickListener {
                     dismissSocialBlockerOverlay()
+                    performGlobalAction(GLOBAL_ACTION_HOME)
                 }
             }
-            card.addView(closeBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(38)))
+            card.addView(closeBtn, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(40)
+            ))
 
-            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
                 @Suppress("DEPRECATION")
@@ -1498,8 +1807,21 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 gravity = Gravity.CENTER
             }
 
-            windowManager.addView(rootLayout, params)
-            socialBlockerOverlayView = rootLayout
+            try {
+                windowManager.addView(rootLayout, params)
+                socialBlockerOverlayView = rootLayout
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add social blocker with layoutType $layoutType: ${e.message}")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        windowManager.addView(rootLayout, params)
+                        socialBlockerOverlayView = rootLayout
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback to TYPE_APPLICATION_OVERLAY also failed: ${e2.message}")
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing social blocker overlay: ${e.message}")
         }
@@ -1526,6 +1848,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         Log.i(TAG, "MBankScreenAccessibilityService destroyed")
         isServiceRunning = false
+        instance = null
         dismissCapybaraOverlay()
         hideFloatingBubble()
         dismissQuickEntrySheet()

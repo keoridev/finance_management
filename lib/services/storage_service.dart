@@ -20,6 +20,7 @@ class StorageService {
   static const String _keyRecurring = 'arc_recurring_v1';
   static const String _keyShortcuts = 'arc_shortcuts_v1';
   static const String _keyWinterArc = 'arc_winter_protocol_v1';
+  static const String _keyArchivedTransactions = 'arc_archived_transactions_v1';
 
   static SharedPreferences? _prefs;
 
@@ -33,6 +34,7 @@ class StorageService {
   static Future<void> saveAll({
     required List<Account> accounts,
     required List<Transaction> transactions,
+    List<Transaction> archivedTransactions = const [],
     required List<TransactionCategory> categories,
     required List<CategoryBudget> budgets,
     required List<SavingsGoal> savingsGoals,
@@ -47,6 +49,7 @@ class StorageService {
       await DatabaseService.instance.saveFullState(
         accounts: accounts,
         transactions: transactions,
+        archivedTransactions: archivedTransactions,
         categories: categories,
         budgets: budgets,
         savingsGoals: savingsGoals,
@@ -61,98 +64,113 @@ class StorageService {
       try {
         final prefs = await _getPrefs();
         final accList = accounts.map((a) => {
-          'id': a.id,
-          'name': a.name,
-          'bankName': a.bankName,
-          'lastDigits': a.lastDigits,
-          'balance': a.balance,
-          'currency': a.currency,
+          'id': a.id.toString(),
+          'name': a.name.toString(),
+          'bankName': a.bankName.toString(),
+          'lastDigits': a.lastDigits?.toString(),
+          'balance': a.balance.toDouble(),
+          'currency': a.currency.toString(),
           'type': a.type.index,
           'color': a.color.toARGB32(),
         }).toList();
 
         final txList = transactions.map((t) => {
-          'id': t.id,
-          'title': t.title,
-          'amount': t.amount,
+          'id': t.id.toString(),
+          'title': t.title.toString(),
+          'amount': t.amount.toDouble(),
           'date': t.date.toIso8601String(),
           'type': t.type.index,
-          'categoryId': t.categoryId,
-          'accountId': t.accountId,
-          'toAccountId': t.toAccountId,
-          'note': t.note,
+          'categoryId': t.categoryId.toString(),
+          'accountId': t.accountId.toString(),
+          'toAccountId': t.toAccountId?.toString(),
+          'note': t.note?.toString(),
         }).toList();
 
         final catList = categories.map((c) => {
-          'id': c.id,
-          'name': c.name,
+          'id': c.id.toString(),
+          'name': c.name.toString(),
           'icon': c.icon.codePoint,
           'color': c.color.toARGB32(),
           'type': c.type.index,
         }).toList();
 
         final budList = budgets.map((b) => {
-          'categoryId': b.categoryId,
-          'monthlyLimit': b.monthlyLimit,
+          'categoryId': b.categoryId.toString(),
+          'monthlyLimit': b.monthlyLimit.toDouble(),
         }).toList();
 
         final goalList = savingsGoals.map((g) => {
-          'id': g.id,
-          'title': g.title,
-          'targetAmount': g.targetAmount,
-          'currentAmount': g.currentAmount,
+          'id': g.id.toString(),
+          'title': g.title.toString(),
+          'targetAmount': g.targetAmount.toDouble(),
+          'currentAmount': g.currentAmount.toDouble(),
           'icon': g.icon.codePoint,
           'color': g.color.toARGB32(),
           'targetDate': g.targetDate.toIso8601String(),
         }).toList();
 
         final recList = recurringPayments.map((r) => {
-          'id': r.id,
-          'title': r.title,
-          'amount': r.amount,
+          'id': r.id.toString(),
+          'title': r.title.toString(),
+          'amount': r.amount.toDouble(),
           'frequency': r.frequency.index,
-          'categoryId': r.categoryId,
-          'accountId': r.accountId,
+          'categoryId': r.categoryId.toString(),
+          'accountId': r.accountId.toString(),
           'nextDueDate': r.nextDueDate.toIso8601String(),
           'isActive': r.isActive,
-          'note': r.note,
+          'note': r.note?.toString(),
         }).toList();
 
         final shortList = shortcuts.map((s) => {
-          'id': s.id,
-          'title': s.title,
-          'amount': s.amount,
-          'categoryId': s.categoryId,
-          'accountId': s.accountId,
+          'id': s.id.toString(),
+          'title': s.title.toString(),
+          'amount': s.amount.toDouble(),
+          'categoryId': s.categoryId.toString(),
+          'accountId': s.accountId.toString(),
           'icon': s.icon.codePoint,
           'color': s.color.toARGB32(),
         }).toList();
 
-        await prefs.setString(_keyAccounts, jsonEncode(accList));
-        await prefs.setString(_keyTransactions, jsonEncode(txList));
-        await prefs.setString(_keyCategories, jsonEncode(catList));
-        await prefs.setString(_keyBudgets, jsonEncode(budList));
-        await prefs.setString(_keySavingsGoals, jsonEncode(goalList));
-        await prefs.setString(_keyRecurring, jsonEncode(recList));
-        await prefs.setString(_keyShortcuts, jsonEncode(shortList));
-        await prefs.setInt('arc_widget_winter_streak', noSpendStreak);
-        await prefs.setString(_keyWinterArc, jsonEncode({
-          'noSpendStreak': noSpendStreak,
-          'lastCheckIn': lastWinterCheckInDate?.toIso8601String(),
-          'winterShields': winterShields,
-        }));
-        await prefs.setInt('arc_winter_shields_v1', winterShields);
+        final archivedList = archivedTransactions.map((t) => {
+          'id': t.id.toString(),
+          'title': t.title.toString(),
+          'amount': t.amount.toDouble(),
+          'date': t.date.toIso8601String(),
+          'type': t.type.index,
+          'categoryId': t.categoryId.toString(),
+          'accountId': t.accountId.toString(),
+          'toAccountId': t.toAccountId?.toString(),
+          'note': t.note?.toString(),
+        }).toList();
+
+        try { await prefs.setString(_keyAccounts, jsonEncode(accList)); } catch (_) {}
+        try { await prefs.setString(_keyTransactions, jsonEncode(txList)); } catch (_) {}
+        try { await prefs.setString(_keyArchivedTransactions, jsonEncode(archivedList)); } catch (_) {}
+        try { await prefs.setString(_keyCategories, jsonEncode(catList)); } catch (_) {}
+        try { await prefs.setString(_keyBudgets, jsonEncode(budList)); } catch (_) {}
+        try { await prefs.setString(_keySavingsGoals, jsonEncode(goalList)); } catch (_) {}
+        try { await prefs.setString(_keyRecurring, jsonEncode(recList)); } catch (_) {}
+        try { await prefs.setString(_keyShortcuts, jsonEncode(shortList)); } catch (_) {}
+        try { await prefs.setInt('arc_widget_winter_streak', noSpendStreak); } catch (_) {}
+        try {
+          await prefs.setString(_keyWinterArc, jsonEncode({
+            'noSpendStreak': noSpendStreak,
+            'lastCheckIn': lastWinterCheckInDate?.toIso8601String(),
+            'winterShields': winterShields,
+          }));
+        } catch (_) {}
+        try { await prefs.setInt('arc_winter_shields_v1', winterShields); } catch (_) {}
         if (lastWinterCheckInDate != null) {
-          await prefs.setString('arc_winter_last_checkin_v1', lastWinterCheckInDate.toIso8601String());
+          try { await prefs.setString('arc_winter_last_checkin_v1', lastWinterCheckInDate.toIso8601String()); } catch (_) {}
         }
 
         final isToday = lastWinterCheckInDate != null &&
             lastWinterCheckInDate.year == DateTime.now().year &&
             lastWinterCheckInDate.month == DateTime.now().month &&
             lastWinterCheckInDate.day == DateTime.now().day;
-        await prefs.setBool('arc_widget_winter_checked', isToday);
-      } catch (e) {
-        debugPrint('[StorageService] SharedPreferences mirror warning: $e');
+        try { await prefs.setBool('arc_widget_winter_checked', isToday); } catch (_) {}
+      } catch (_) {
+        // SQLite WAL is the primary authoritative ACID persistence
       }
     } catch (e) {
       debugPrint('[StorageService] Critical error in saveAll: $e');
@@ -245,6 +263,32 @@ class StorageService {
           return Transaction(
             id: m['id'] as String? ?? 'tx_${DateTime.now().millisecondsSinceEpoch}',
             title: m['title'] as String? ?? 'Операция',
+            amount: (m['amount'] as num?)?.toDouble() ?? 0.0,
+            date: txDate,
+            type: TransactionType.values[typeIndex.clamp(0, TransactionType.values.length - 1)],
+            categoryId: m['categoryId'] as String? ?? 'cat_other',
+            accountId: m['accountId'] as String? ?? 'acc_mbank',
+            toAccountId: m['toAccountId'] as String?,
+            note: m['note'] as String?,
+          );
+        }).toList();
+      }
+
+      // Archived Transactions
+      final archivedRaw = prefs.getString(_keyArchivedTransactions);
+      if (archivedRaw != null && archivedRaw.isNotEmpty) {
+        final List list = jsonDecode(archivedRaw);
+        result['archivedTransactions'] = list.map((m) {
+          final typeIndex = (m['type'] as num?)?.toInt() ?? 0;
+          DateTime txDate = DateTime.now();
+          if (m['date'] is int) {
+            txDate = DateTime.fromMillisecondsSinceEpoch(m['date'] as int);
+          } else if (m['date'] is String) {
+            txDate = DateTime.tryParse(m['date'] as String) ?? DateTime.now();
+          }
+          return Transaction(
+            id: m['id'] as String? ?? 'tx_archived_${DateTime.now().millisecondsSinceEpoch}',
+            title: m['title'] as String? ?? 'Архивная операция',
             amount: (m['amount'] as num?)?.toDouble() ?? 0.0,
             date: txDate,
             type: TransactionType.values[typeIndex.clamp(0, TransactionType.values.length - 1)],
@@ -422,6 +466,7 @@ class StorageService {
       await DatabaseService.instance.clearAll();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_keyTransactions);
+      await prefs.remove(_keyArchivedTransactions);
       await prefs.remove(_keyAccounts);
       await prefs.remove(_keyCategories);
       await prefs.remove(_keyBudgets);

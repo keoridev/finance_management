@@ -31,7 +31,15 @@ class AIRoastService {
   static Future<String?> getApiKey() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_prefApiKey);
+      await prefs.reload(); // Force refresh from disk
+      final key = prefs.getString('api_key') ??
+          prefs.getString('gemini_api_key') ??
+          prefs.getString('arc_gemini_api_key') ??
+          prefs.getString(_prefApiKey);
+      if (key != null && key.trim().isNotEmpty) {
+        return key.trim();
+      }
+      return null;
     } catch (_) {
       return null;
     }
@@ -40,7 +48,11 @@ class AIRoastService {
   static Future<void> saveApiKey(String key) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefApiKey, key.trim());
+      final cleanKey = key.trim();
+      await prefs.setString(_prefApiKey, cleanKey);
+      await prefs.setString('api_key', cleanKey);
+      await prefs.setString('gemini_api_key', cleanKey);
+      await prefs.setString('arc_gemini_api_key', cleanKey);
     } catch (_) {}
   }
 
@@ -106,7 +118,7 @@ class AIRoastService {
     required double remainingGoal,
   }) async {
     final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 12);
+    client.connectionTimeout = const Duration(seconds: 3);
 
     try {
       final now = DateTime.now();
@@ -155,8 +167,9 @@ class AIRoastService {
         }
       });
 
+      debugPrint('[AIRoastService] Calling Gemini Roast API (API key length: ${apiKey.length})');
       request.write(body);
-      final response = await request.close();
+      final response = await request.close().timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
         final responseBody = await response.transform(utf8.decoder).join();
@@ -164,13 +177,17 @@ class AIRoastService {
         final candidateText =
             json['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
 
-        if (candidateText != null) {
-          // Extract JSON from markdown fences if any
-          final cleaned = candidateText
-              .replaceAll('```json', '')
-              .replaceAll('```', '')
-              .trim();
-          final parsed = jsonDecode(cleaned);
+        if (candidateText != null && candidateText.trim().isNotEmpty) {
+          // Strictly strip markdown code block fences (e.g. ```json ... ```)
+          String cleanedJson = candidateText.replaceAll(RegExp(r'```(?:json)?|```'), '').trim();
+
+          final firstBrace = cleanedJson.indexOf('{');
+          final lastBrace = cleanedJson.lastIndexOf('}');
+          if (firstBrace != -1 && lastBrace != -1 && lastBrace >= firstBrace) {
+            cleanedJson = cleanedJson.substring(firstBrace, lastBrace + 1);
+          }
+
+          final Map<String, dynamic> parsed = Map<String, dynamic>.from(jsonDecode(cleanedJson) as Map);
 
           return AIRoastResult(
             roastText: parsed['roast'] as String? ?? 'Слишком много трат, капибара в шоке.',

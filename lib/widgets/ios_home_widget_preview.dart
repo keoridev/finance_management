@@ -454,6 +454,7 @@ class _IosHomeWidgetPreviewState extends State<IosHomeWidgetPreview> {
                     isWinterChecked: widget.controller.isWinterCheckedToday,
                     accountName: widget.controller.activeAccountLabel,
                     todaySpent: widget.controller.todaySpentLabel,
+                    quickButtons: widget.controller.quickButtonsForWidget,
                   );
                   final quote = _capyQuotes[_capyQuoteIndex % _capyQuotes.length];
                   await WidgetLaunchService.syncCapyPrediction(
@@ -1107,6 +1108,8 @@ class _IosHomeWidgetPreviewState extends State<IosHomeWidgetPreview> {
   }
 
   Widget _buildQuickActionsWidget(double balance, String accountName) {
+    final quickButtons = widget.controller.quickButtonsForWidget.take(4).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1189,40 +1192,23 @@ class _IosHomeWidgetPreviewState extends State<IosHomeWidgetPreview> {
         ),
         const SizedBox(height: 12),
 
-        // 4 Fast payment tiles
+        // 4 Fast payment tiles (prioritizes user's most recent entered expenses)
         Row(
           children: [
-            _buildQuickTile(
-              icon: Icons.directions_bus_rounded,
-              iconColor: const Color(0xFF0A84FF),
-              title: 'Маршрутка',
-              amount: 25.0,
-              onTap: () => _executeQuickPayment('Маршрутка', 25.0, 'cat_transport'),
-            ),
-            const SizedBox(width: 6),
-            _buildQuickTile(
-              icon: Icons.coffee_rounded,
-              iconColor: const Color(0xFFFF9F0A),
-              title: 'Кофе',
-              amount: 150.0,
-              onTap: () => _executeQuickPayment('Кофе', 150.0, 'cat_restaurants'),
-            ),
-            const SizedBox(width: 6),
-            _buildQuickTile(
-              icon: Icons.restaurant_rounded,
-              iconColor: const Color(0xFFFF453A),
-              title: 'Обед',
-              amount: 350.0,
-              onTap: () => _executeQuickPayment('Обед', 350.0, 'cat_restaurants'),
-            ),
-            const SizedBox(width: 6),
-            _buildQuickTile(
-              icon: Icons.local_taxi_rounded,
-              iconColor: const Color(0xFFFFD60A),
-              title: 'Такси',
-              amount: 180.0,
-              onTap: () => _executeQuickPayment('Такси', 180.0, 'cat_transport'),
-            ),
+            for (int i = 0; i < quickButtons.length; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              _buildQuickTile(
+                icon: quickButtons[i].icon,
+                iconColor: quickButtons[i].color,
+                title: quickButtons[i].title,
+                amount: quickButtons[i].amount,
+                onTap: () => _executeQuickPayment(
+                  quickButtons[i].title,
+                  quickButtons[i].amount,
+                  quickButtons[i].categoryId,
+                ),
+              ),
+            ],
           ],
         ),
       ],
@@ -1277,12 +1263,14 @@ class _IosHomeWidgetPreviewState extends State<IosHomeWidgetPreview> {
               ),
               const SizedBox(height: 1),
               Text(
-                '${amount.toInt()} сом',
+                amount % 1.0 == 0.0 ? '${amount.toInt()} сом' : '${amount.toStringAsFixed(1)} сом',
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                   color: Colors.white,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

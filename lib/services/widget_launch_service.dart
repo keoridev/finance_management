@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/quick_payment_shortcut.dart';
 import '../models/transaction_type.dart';
 import '../utils/formatters.dart';
 
@@ -82,6 +83,10 @@ class WidgetLaunchService {
       onDepositDream?.call();
     } else if (action == 'workout_penalty') {
       onWorkoutPenalty?.call();
+    } else if (action != null && action.startsWith('debt_reminder:')) {
+      onQuickShortcut?.call(action);
+    } else if (action != null && action.startsWith('shortcut_dynamic:')) {
+      onQuickShortcut?.call(action);
     } else if (action != null && action.startsWith('shortcut:')) {
       final key = action.substring('shortcut:'.length);
       onQuickShortcut?.call(key);
@@ -95,6 +100,7 @@ class WidgetLaunchService {
     bool isWinterChecked = false,
     String? accountName,
     String? todaySpent,
+    List<QuickPaymentShortcut>? quickButtons,
   }) async {
     final formatted = CurrencyFormatter.format(balance);
     try {
@@ -108,6 +114,16 @@ class WidgetLaunchService {
       if (todaySpent != null) {
         await prefs.setString('arc_widget_today_spent', todaySpent);
       }
+      if (quickButtons != null) {
+        for (int i = 0; i < 4; i++) {
+          if (i < quickButtons.length) {
+            final b = quickButtons[i];
+            await prefs.setString('arc_widget_btn_${i}_title', b.title);
+            await prefs.setDouble('arc_widget_btn_${i}_amount', b.amount);
+            await prefs.setString('arc_widget_btn_${i}_cat', b.categoryId);
+          }
+        }
+      }
     } catch (_) {}
 
     try {
@@ -117,6 +133,12 @@ class WidgetLaunchService {
         'isWinterChecked': isWinterChecked,
         'accountName': accountName ?? 'Все счета',
         'todaySpent': todaySpent ?? 'Сегодня: без спонтанных трат',
+        if (quickButtons != null)
+          'quickButtons': quickButtons.take(4).map((b) => {
+            'title': b.title,
+            'amount': b.amount,
+            'categoryId': b.categoryId,
+          }).toList(),
       });
     } catch (_) {}
   }
@@ -225,6 +247,15 @@ class WidgetLaunchService {
     try {
       await _channel.invokeMethod('openNotificationListenerSettings');
     } catch (_) {}
+  }
+
+  /// Open Android system app notification settings (or listener settings as fallback)
+  static Future<void> openNotificationSettings() async {
+    try {
+      await _channel.invokeMethod('openNotificationSettings');
+    } catch (_) {
+      await openNotificationListenerSettings();
+    }
   }
 
   /// Check if Android Accessibility Service is enabled for direct screen-level receipt reading

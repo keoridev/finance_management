@@ -131,5 +131,60 @@ void main() {
       expect(parsed.title, 'Sierra Coffee');
       expect(parsed.categoryId, 'cat_restaurants');
     });
+
+    test('NEVER creates 90k false expense on pure balance notification: MBank: Баланс карты *4820: 90 000 сом', () {
+      final text = 'MBank: Баланс карты *4820: 90 000 сом';
+      final parsed = MBankParserService.parse(text);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.isBalanceOnly, isTrue);
+      expect(parsed.amount, 0.0);
+      expect(parsed.balanceAfter, 90000.0);
+      expect(parsed.cardLastDigits, '4820');
+    });
+
+    test('NEVER creates 90k false expense on available funds push: Доступно на карте *4820: 90 000.00 KGS', () {
+      final text = 'Доступно на карте *4820: 90 000.00 KGS';
+      final parsed = MBankParserService.parse(text);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.isBalanceOnly, isTrue);
+      expect(parsed.amount, 0.0);
+      expect(parsed.balanceAfter, 90000.0);
+      expect(parsed.cardLastDigits, '4820');
+    });
+
+    test('Correctly separates balance from expense when balance comes first: MBank: Баланс 90 000 сом. Оплата 250 сом в Кафе Фаиза', () {
+      final text = 'MBank: Баланс 90 000 сом. Оплата 250 сом в Кафе Фаиза';
+      final parsed = MBankParserService.parse(text);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.isBalanceOnly, isFalse);
+      expect(parsed.amount, 250.0);
+      expect(parsed.balanceAfter, 90000.0);
+      expect(parsed.type, TransactionType.expense);
+      expect(parsed.title, 'Кафе Фаиза');
+    });
+
+    test('Parses Kyrgyz language transaction with balance: MBANK: Төлөм: 150 сом. Калдык: 89 850 сом', () {
+      final text = 'MBANK: Төлөм: 150 сом. Калдык: 89 850 сом';
+      final parsed = MBankParserService.parse(text);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.isBalanceOnly, isFalse);
+      expect(parsed.amount, 150.0);
+      expect(parsed.balanceAfter, 89850.0);
+      expect(parsed.type, TransactionType.expense);
+    });
+
+    test('Parses Kyrgyz language pure balance: MBANK: Картадагы калдык: 90 000 сом', () {
+      final text = 'MBANK: Картадагы калдык: 90 000 сом';
+      final parsed = MBankParserService.parse(text);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.isBalanceOnly, isTrue);
+      expect(parsed.amount, 0.0);
+      expect(parsed.balanceAfter, 90000.0);
+    });
   });
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/transaction_type.dart';
@@ -7,6 +8,7 @@ import '../widgets/glass_container.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/empty_state_view.dart';
 import '../widgets/transaction_success_overlay.dart';
+import 'archived_transactions_screen.dart';
 
 class TransactionsScreen extends StatefulWidget {
   final FinanceController controller;
@@ -49,6 +51,51 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
         ),
         actions: [
+          ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) {
+              final count = widget.controller.archivedCount;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Архив операций',
+                    icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 21),
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.of(context).push(
+                        CupertinoPageRoute(
+                          builder: (_) => ArchivedTransactionsScreen(controller: widget.controller),
+                        ),
+                      );
+                    },
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      top: 8,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFF9F0A),
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Добавить операцию',
             icon: const Icon(Icons.add_rounded, color: Color(0xFFFF9F0A), size: 24),
@@ -213,8 +260,44 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         transaction: tx,
                         category: category,
                         account: account,
-                        onDelete: () =>
-                            widget.controller.deleteTransaction(tx.id),
+                        onDelete: () {
+                          final deletedTx = tx;
+                          widget.controller.deleteTransaction(tx.id);
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF1C1C1E),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                              ),
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.archive_outlined, color: Color(0xFFFF9F0A), size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      '«${deletedTx.title}» в архиве',
+                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              action: SnackBarAction(
+                                label: 'ВЕРНУТЬ',
+                                textColor: const Color(0xFFFF9F0A),
+                                onPressed: () {
+                                  HapticFeedback.mediumImpact();
+                                  widget.controller.restoreTransaction(deletedTx.id);
+                                },
+                              ),
+                              duration: const Duration(seconds: 4),
+                            ),
+                          );
+                        },
                         onDuplicate: () {
                           widget.controller.duplicateTransaction(tx);
                           TransactionSuccessOverlay.show(

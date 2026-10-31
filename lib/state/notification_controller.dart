@@ -108,8 +108,8 @@ class NotificationController extends ChangeNotifier {
     _initialEntranceTimer?.cancel();
     _hourlyTimer?.cancel();
 
-    // 1. Automatic Entrance Trigger: Capybara greets user with chill wisdom after 1.8s
-    _initialEntranceTimer = Timer(const Duration(milliseconds: 1800), () {
+    // 1. Automatic Entrance Trigger: Capybara greets user with chill wisdom after 300ms
+    _initialEntranceTimer = Timer(const Duration(milliseconds: 300), () {
       triggerCapybaraZenNotification();
     });
 
@@ -164,17 +164,31 @@ class NotificationController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Evaluates real financial data from [FinanceController] and returns a dynamic,
-  /// chill, philosophical Capybara insight tailored to the user's actual numbers.
-  static CapybaraInsight getDynamicInsight(
-    FinanceController? controller, {
-    int offset = 0,
-  }) {
-    final List<CapybaraInsight> pool = [];
+  // Dynamic memoization cache for Capybara insights pool
+  static List<CapybaraInsight>? _cachedPool;
+  static DateTime? _lastPoolCalcTime;
+  static int? _lastTxCount;
+  static double? _lastBalance;
+
+  /// Returns the complete list of insights (financial rules + Bishkek memes)
+  /// with memoized caching to eliminate redundant loop overhead.
+  static List<CapybaraInsight> getAllInsightsPool(FinanceController? controller) {
     final now = DateTime.now();
+    final currentTxCount = controller?.transactions.length ?? 0;
+    final currentBalance = controller?.totalBalance ?? 0.0;
+
+    if (_cachedPool != null &&
+        _lastPoolCalcTime != null &&
+        now.difference(_lastPoolCalcTime!).inMilliseconds < 1500 &&
+        _lastTxCount == currentTxCount &&
+        _lastBalance == currentBalance) {
+      return _cachedPool!;
+    }
+
+    final List<CapybaraInsight> pool = [];
 
     if (controller != null) {
-      final balance = controller.totalBalance;
+      final balance = currentBalance;
       final income = controller.periodIncome;
       final expense = controller.periodExpense;
       final streak = controller.noSpendStreak;
@@ -194,23 +208,27 @@ class NotificationController extends ChangeNotifier {
         );
       }
 
-      // 2. Today's Multiple Spending Detection
-      final todayExpenses = controller.transactions.where((t) {
-        return t.type == TransactionType.expense &&
+      // 2. Today's Multiple Spending Detection (O(N) single pass, no intermediate List)
+      int todayExpenseCount = 0;
+      double todaySpent = 0.0;
+      for (final t in controller.transactions) {
+        if (t.type == TransactionType.expense &&
             t.date.year == now.year &&
             t.date.month == now.month &&
-            t.date.day == now.day;
-      }).toList();
+            t.date.day == now.day) {
+          todayExpenseCount++;
+          todaySpent += t.amount;
+        }
+      }
 
-      if (todayExpenses.length >= 3) {
-        final todaySpent = todayExpenses.fold(0.0, (s, t) => s + t.amount);
+      if (todayExpenseCount >= 3) {
         pool.add(
           CapybaraInsight(
             title: 'Капибара считает чеки',
             body:
-                'Сегодня уже ${todayExpenses.length} трат на сумму ${todaySpent.toInt()} сом. Капибара вежливо интересуется: пульс кошелька в норме? Сделай паузу и завари чай.',
+                'Сегодня уже $todayExpenseCount трат на сумму ${todaySpent.toInt()} сом. Капибара вежливо интересуется: пульс кошелька в норме? Сделай паузу и завари чай.',
             actionLabel: '+ Записать',
-            statusTag: 'СЕГОДНЯ ${todayExpenses.length} ТРАТ • ПРИТОРМОЗИ',
+            statusTag: 'СЕГОДНЯ $todayExpenseCount ТРАТ • ПРИТОРМОЗИ',
             mood: 'alert',
           ),
         );
@@ -373,238 +391,255 @@ class NotificationController extends ChangeNotifier {
       }
     }
 
-    // Extensive Bishkek Humor & Philosophical Zen Memes pool (strictly zero emojis)
-    pool.addAll(const [
-      CapybaraInsight(
-        title: 'Экспедиция на Дордой',
-        body:
-            'Поехал на Дордой только за теплыми носками. Вернулся без денег, но с двумя спортивками, ковром и кумысом. Капибара глубоко вздыхает и ставит чайник.',
-        actionLabel: '+ Записать',
-        statusTag: 'БИШКЕК • ДОРДОЙСКИЙ СИНДРОМ',
-        icon: Icons.shopping_bag_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Экономия по-бишкекски',
-        body:
-            'Пройти две остановки пешком, чтобы сберечь 25 сом на маршрутке, а потом психануть и вызвать такси комфорт за 260 сом. Финансовый гений 80 уровня.',
-        actionLabel: '+ Записать',
-        statusTag: 'БИШКЕК • 25 СОМ ИЛИ ТАКСИ',
-        icon: Icons.directions_bus_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Ночной босо-лагман',
-        body:
-            'На часах 23:45. Разум шепчет: «Ты копишь на мечту». Желудок кричит: «Горячий лагман сам себя не съест!». Капибара прячет телефон под подушку.',
-        actionLabel: 'Спать на чиле',
-        statusTag: 'НОЧНОЙ ЖОР • ЛАГМАН ЖДЕТ',
-        icon: Icons.restaurant_rounded,
-        mood: 'night',
-      ),
-      CapybaraInsight(
-        title: 'Эволюция зарплаты',
-        body:
-            'День получки: «Официант, всем чай с чабрецом и лепешки за мой счет!». За 3 дня до зарплаты: «Если разделить одну пачку гречки на 6 равных кучек...».',
-        actionLabel: '+ Записать',
-        statusTag: 'РЕАЛЬНОСТЬ • ДЕНЬ ЗАРПЛАТЫ',
-        icon: Icons.account_balance_wallet_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Торги на Ошском',
-        body:
-            'Торговаться на Ошском базаре за 20 сом скидки на курагу с невозмутимым лицом управляющего фондом на Уолл-стрит. Капибара одобряет настойчивость.',
-        actionLabel: '+ Записать',
-        statusTag: 'БАЗАР • УОЛЛ-СТРИТ',
-        icon: Icons.storefront_rounded,
-        mood: 'boss',
-      ),
-      CapybaraInsight(
-        title: 'Доставка в непогоду',
-        body:
-            'Доставка 190 сом, надбавка за снег 95 сом, сбор за упаковку 30 сом. Итого две самсы обошлись как обед в ресторане. Зато капибара в тепле.',
-        actionLabel: '+ Записать',
-        statusTag: 'ДОСТАВКА • СУХИЕ НОГИ',
-        icon: Icons.delivery_dining_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Кофейная арифметика',
-        body:
-            'Капучино на овсяном молоке за 240 сом выпит за 4 минуты. Сидишь и считаешь в уме, сколько килограммов плова можно было сварить на эти деньги.',
-        actionLabel: '+ Записать',
-        statusTag: 'КОФЕ • КАПУЧИНО ТАЕТ',
-        icon: Icons.coffee_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Уведомление от MBank',
-        body:
-            'Пришло уведомление о поступлении перевода. Две секунды эйфории... и сразу три списания за интернет, рассрочку и свет. Деньги просто зашли поздороваться.',
-        actionLabel: '+ Записать',
-        statusTag: 'MBANK • СЕКУНДА СЧАСТЬЯ',
-        icon: Icons.notifications_active_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Корзина на маркетплейсе',
-        body:
-            'В корзине 14 жизненно необходимых вещей: автоматическая чесалка для кота, подсветка для унитаза и мини-фонтан. Капибара на грани обморока.',
-        actionLabel: 'Спасти стрик',
-        statusTag: 'МАРКЕТПЛЕЙС • ДЕРЖИСЬ',
-        icon: Icons.shopping_cart_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Копилка на Иссык-Куль',
-        body:
-            'Если отказаться от кофе до июля — как раз хватит на четыре дня в Бостери, катамаран и три горячих чебурека на пляже. План утвержден Капибарой.',
-        actionLabel: 'В копилку',
-        statusTag: 'ИССЫК-КУЛЬ • ЛЕТНИЙ ПЛАН',
-        icon: Icons.beach_access_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Магия безналичных',
-        body:
-            'Когда прикладываешь карту или платишь по QR — кажется, что деньги виртуальные. Пока не зайдешь в ARC и не посмотришь в глаза мудрой Капибаре.',
-        actionLabel: '+ Записать',
-        statusTag: 'БЕЗНАЛ • ЦИФРОВОЙ САМУРАЙ',
-        icon: Icons.credit_card_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Шаг к бишкекской трешке',
-        body:
-            'Закинул 150 сом в копилку мечты. До покупки квартиры в центре Бишкека осталось всего 39 990 таких пополнений. Главное — регулярность и позитив!',
-        actionLabel: 'В копилку',
-        statusTag: 'МЕЧТА • ВЕЛИКИЙ СТАРТ',
-        icon: Icons.home_rounded,
-        mood: 'boss',
-      ),
-      CapybaraInsight(
-        title: 'Ловушка скидки 70%',
-        body:
-            'Скидка 70% на вещь, о существовании которой ты не подозревал пять минут назад. Помни: скидка 100% — это закрыть вкладку и спокойно попить воды.',
-        actionLabel: 'Спасти стрик',
-        statusTag: 'ШОПИНГ • СКИДКА 100%',
-        icon: Icons.local_offer_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Поход за солью в Глобус',
-        body:
-            'Зашел в гипермаркет только за солью и хлебом. На кассе чек на 3800 сом, а в тележке соус манго-чили и силиконовые формочки. Чистая магия!',
-        actionLabel: '+ Записать',
-        statusTag: 'ГИПЕРМАРКЕТ • ВНЕЗАПНО',
-        icon: Icons.shopping_basket_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Долг вернулся из прошлого',
-        body:
-            'Знакомый вернул 500 сом, взятые прошлым летом. Ощущение, будто нашел клад древних кочевников. Мозг уже строит планы, как спустить их за 10 минут.',
-        actionLabel: 'В копилку',
-        statusTag: 'НЕОЖИДАННОСТЬ • БОНУС',
-        icon: Icons.savings_rounded,
-        mood: 'celebration',
-      ),
-      CapybaraInsight(
-        title: 'Кэшбек инвестора',
-        body:
-            'Начислили 18 сом кэшбека. Почувствовал себя Уорреном Баффетом на максималках. Капибара уважительно кивает с кружкой горячего горного чая.',
-        actionLabel: 'В копилку',
-        statusTag: 'ИНВЕСТОР • КЭШБЕК 18 СОМ',
-        icon: Icons.trending_up_rounded,
-        mood: 'boss',
-      ),
-      CapybaraInsight(
-        title: 'Шопинг-терапия',
-        body:
-            'Устал и решил порадовать себя спонтанной покупкой. Увидел баланс после чека — расстроился еще больше. Теперь нужно купить что-то еще, чтобы успокоиться.',
-        actionLabel: '+ Записать',
-        statusTag: 'ТЕРАПИЯ • ЗАМКНУТЫЙ КРУГ',
-        icon: Icons.psychology_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Термос самурая',
-        body:
-            'Настоящий воин Winter Arc гордо идет мимо модной кофейни с домашним чаем в термосе. Сэкономлено 200 сом, самооценка выросла до снежных вершин.',
-        actionLabel: 'Спасти стрик',
-        statusTag: 'WINTER ARC • ТЕРМОС В РУКЕ',
-        icon: Icons.shield_rounded,
-        mood: 'celebration',
-      ),
-      CapybaraInsight(
-        title: 'Подушка безопасности',
-        body:
-            'Моя финансовая подушка безопасности пока похожа на тонкий блинчик. Но Капибара верит: шаг за шагом мы превратим ее в царский ортопедический матрас!',
-        actionLabel: 'В копилку',
-        statusTag: 'ПОДУШКА • БЛИНЧИК',
-        icon: Icons.bed_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Планы на выходные',
-        body:
-            'План: провести скромные выходные дома за книгой и сохранить бюджет. Реальность: «Бро, поехали на шашлыки в горы!» — и минус 2500 сом из кошелька.',
-        actionLabel: '+ Записать',
-        statusTag: 'ВЫХОДНЫЕ • ШАШЛЫКИ В ГОРАХ',
-        icon: Icons.landscape_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Рассрочка без переплат',
-        body:
-            'Смартфон в рассрочку на 24 месяца: ноль переплат банку, сто процентов гарантии, что следующие два года ты будешь дышать воздухом вместо обеда.',
-        actionLabel: '+ Записать',
-        statusTag: 'РАССРОЧКА • ФИЛОСОФИЯ',
-        icon: Icons.phone_android_rounded,
-        mood: 'alert',
-      ),
-      CapybaraInsight(
-        title: 'Дзен горячих источников',
-        body:
-            'Капибара сидит в горячих источниках Иссык-Аты. Деньги — это просто инструмент, а внутренний покой бесценен. Зафиксируй день и отдыхай.',
-        actionLabel: 'Спасти стрик',
-        statusTag: 'ИССЫК-АТА • ПОЛНЫЙ ДЗЕН',
-        icon: Icons.hot_tub_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Волк с проспекта Чуй',
-        body:
-            'Купил актив на 400 сом. Обновляю приложение каждые сорок секунд с видом финансового магната. Доход: плюс 80 тыйынов. Жизнь удалась.',
-        actionLabel: 'В копилку',
-        statusTag: 'БИШКЕК • ВОЛК С ЧУЯ',
-        icon: Icons.auto_graph_rounded,
-        mood: 'boss',
-      ),
-      CapybaraInsight(
-        title: 'Урок финансового дзена',
-        body:
-            'Капибара знает: лучший способ сохранить 1000 сом — это просто не покупать то, без чего можно обойтись. Пей чай и наслаждайся моментом.',
-        actionLabel: '+ Записать',
-        statusTag: 'РЕЖИМ ДЗЕН • НА РАССЛАБОНЕ',
-        icon: Icons.spa_rounded,
-        mood: 'zen',
-      ),
-      CapybaraInsight(
-        title: 'Мудрость банкомата',
-        body:
-            'Банкомат передавал привет! Сказал, что уважает твой покой и просил заходить только за снятием кэша на приятные радости жизни.',
-        actionLabel: 'В копилку',
-        statusTag: 'ПОЛНЫЙ ЧИЛЛ • БАНКОМАТ',
-        icon: Icons.atm_rounded,
-        mood: 'boss',
-      ),
-    ]);
+    pool.addAll(_staticMemesPool);
 
+    _cachedPool = pool;
+    _lastPoolCalcTime = now;
+    _lastTxCount = currentTxCount;
+    _lastBalance = currentBalance;
+
+    return pool;
+  }
+
+  /// Evaluates real financial data from [FinanceController] and returns a dynamic,
+  /// chill, philosophical Capybara insight tailored to the user's actual numbers.
+  static CapybaraInsight getDynamicInsight(
+    FinanceController? controller, {
+    int offset = 0,
+  }) {
+    final pool = getAllInsightsPool(controller);
     final safeIndex = (offset.abs()) % pool.length;
     return pool[safeIndex];
   }
+
+  // Extensive Bishkek Humor & Philosophical Zen Memes pool (strictly zero emojis)
+  static const List<CapybaraInsight> _staticMemesPool = [
+    CapybaraInsight(
+      title: 'Экспедиция на Дордой',
+      body:
+          'Поехал на Дордой только за теплыми носками. Вернулся без денег, но с двумя спортивками, ковром и кумысом. Капибара глубоко вздыхает и ставит чайник.',
+      actionLabel: '+ Записать',
+      statusTag: 'БИШКЕК • ДОРДОЙСКИЙ СИНДРОМ',
+      icon: Icons.shopping_bag_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Экономия по-бишкекски',
+      body:
+          'Пройти две остановки пешком, чтобы сберечь 25 сом на маршрутке, а потом психануть и вызвать такси комфорт за 260 сом. Финансовый гений 80 уровня.',
+      actionLabel: '+ Записать',
+      statusTag: 'БИШКЕК • 25 СОМ ИЛИ ТАКСИ',
+      icon: Icons.directions_bus_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Ночной босо-лагман',
+      body:
+          'На часах 23:45. Разум шепчет: «Ты копишь на мечту». Желудок кричит: «Горячий лагман сам себя не съест!». Капибара прячет телефон под подушку.',
+      actionLabel: 'Спать на чиле',
+      statusTag: 'НОЧНОЙ ЖОР • ЛАГМАН ЖДЕТ',
+      icon: Icons.restaurant_rounded,
+      mood: 'night',
+    ),
+    CapybaraInsight(
+      title: 'Эволюция зарплаты',
+      body:
+          'День получки: «Официант, всем чай с чабрецом и лепешки за мой счет!». За 3 дня до зарплаты: «Если разделить одну пачку гречки на 6 равных кучек...».',
+      actionLabel: '+ Записать',
+      statusTag: 'РЕАЛЬНОСТЬ • ДЕНЬ ЗАРПЛАТЫ',
+      icon: Icons.account_balance_wallet_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Торги на Ошском',
+      body:
+          'Торговаться на Ошском базаре за 20 сом скидки на курагу с невозмутимым лицом управляющего фондом на Уолл-стрит. Капибара одобряет настойчивость.',
+      actionLabel: '+ Записать',
+      statusTag: 'БАЗАР • УОЛЛ-СТРИТ',
+      icon: Icons.storefront_rounded,
+      mood: 'boss',
+    ),
+    CapybaraInsight(
+      title: 'Доставка в непогоду',
+      body:
+          'Доставка 190 сом, надбавка за снег 95 сом, сбор за упаковку 30 сом. Итого две самсы обошлись как обед в ресторане. Зато капибара в тепле.',
+      actionLabel: '+ Записать',
+      statusTag: 'ДОСТАВКА • СУХИЕ НОГИ',
+      icon: Icons.delivery_dining_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Кофейная арифметика',
+      body:
+          'Капучино на овсяном молоке за 240 сом выпит за 4 минуты. Сидишь и считаешь в уме, сколько килограммов плова можно было сварить на эти деньги.',
+      actionLabel: '+ Записать',
+      statusTag: 'КОФЕ • КАПУЧИНО ТАЕТ',
+      icon: Icons.coffee_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Уведомление от MBank',
+      body:
+          'Пришло уведомление о поступлении перевода. Две секунды эйфории... и сразу три списания за интернет, рассрочку и свет. Деньги просто зашли поздороваться.',
+      actionLabel: '+ Записать',
+      statusTag: 'MBANK • СЕКУНДА СЧАСТЬЯ',
+      icon: Icons.notifications_active_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Корзина на маркетплейсе',
+      body:
+          'В корзине 14 жизненно необходимых вещей: автоматическая чесалка для кота, подсветка для унитаза и мини-фонтан. Капибара на грани обморока.',
+      actionLabel: 'Спасти стрик',
+      statusTag: 'МАРКЕТПЛЕЙС • ДЕРЖИСЬ',
+      icon: Icons.shopping_cart_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Копилка на Иссык-Куль',
+      body:
+          'Если отказаться от кофе до июля — как раз хватит на четыре дня в Бостери, катамаран и три горячих чебурека на пляже. План утвержден Капибарой.',
+      actionLabel: 'В копилку',
+      statusTag: 'ИССЫК-КУЛЬ • ЛЕТНИЙ ПЛАН',
+      icon: Icons.beach_access_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Магия безналичных',
+      body:
+          'Когда прикладываешь карту или платишь по QR — кажется, что деньги виртуальные. Пока не зайдешь в ARC и не посмотришь в глаза мудрой Капибаре.',
+      actionLabel: '+ Записать',
+      statusTag: 'БЕЗНАЛ • ЦИФРОВОЙ САМУРАЙ',
+      icon: Icons.credit_card_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Шаг к бишкекской трешке',
+      body:
+          'Закинул 150 сом в копилку мечты. До покупки квартиры в центре Бишкека осталось всего 39 990 таких пополнений. Главное — регулярность и позитив!',
+      actionLabel: 'В копилку',
+      statusTag: 'МЕЧТА • ВЕЛИКИЙ СТАРТ',
+      icon: Icons.home_rounded,
+      mood: 'boss',
+    ),
+    CapybaraInsight(
+      title: 'Ловушка скидки 70%',
+      body:
+          'Скидка 70% на вещь, о существовании которой ты не подозревал пять минут назад. Помни: скидка 100% — это закрыть вкладку и спокойно попить воды.',
+      actionLabel: 'Спасти стрик',
+      statusTag: 'ШОПИНГ • СКИДКА 100%',
+      icon: Icons.local_offer_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Поход за солью в Глобус',
+      body:
+          'Зашел в гипермаркет только за солью и хлебом. На кассе чек на 3800 сом, а в тележке соус манго-чили и силиконовые формочки. Чистая магия!',
+      actionLabel: '+ Записать',
+      statusTag: 'ГИПЕРМАРКЕТ • ВНЕЗАПНО',
+      icon: Icons.shopping_basket_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Долг вернулся из прошлого',
+      body:
+          'Знакомый вернул 500 сом, взятые прошлым летом. Ощущение, будто нашел клад древних кочевников. Мозг уже строит планы, как спустить их за 10 минут.',
+      actionLabel: 'В копилку',
+      statusTag: 'НЕОЖИДАННОСТЬ • БОНУС',
+      icon: Icons.savings_rounded,
+      mood: 'celebration',
+    ),
+    CapybaraInsight(
+      title: 'Кэшбек инвестора',
+      body:
+          'Начислили 18 сом кэшбека. Почувствовал себя Уорреном Баффетом на максималках. Капибара уважительно кивает с кружкой горячего горного чая.',
+      actionLabel: 'В копилку',
+      statusTag: 'ИНВЕСТОР • КЭШБЕК 18 СОМ',
+      icon: Icons.trending_up_rounded,
+      mood: 'boss',
+    ),
+    CapybaraInsight(
+      title: 'Шопинг-терапия',
+      body:
+          'Устал и решил порадовать себя спонтанной покупкой. Увидел баланс после чека — расстроился еще больше. Теперь нужно купить что-то еще, чтобы успокоиться.',
+      actionLabel: '+ Записать',
+      statusTag: 'ТЕРАПИЯ • ЗАМКНУТЫЙ КРУГ',
+      icon: Icons.psychology_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Термос самурая',
+      body:
+          'Настоящий воин Winter Arc гордо идет мимо модной кофейни с домашним чаем в термосе. Сэкономлено 200 сом, самооценка выросла до снежных вершин.',
+      actionLabel: 'Спасти стрик',
+      statusTag: 'WINTER ARC • ТЕРМОС В РУКЕ',
+      icon: Icons.shield_rounded,
+      mood: 'celebration',
+    ),
+    CapybaraInsight(
+      title: 'Подушка безопасности',
+      body:
+          'Моя финансовая подушка безопасности пока похожа на тонкий блинчик. Но Капибара верит: шаг за шагом мы превратим ее в царский ортопедический матрас!',
+      actionLabel: 'В копилку',
+      statusTag: 'ПОДУШКА • БЛИНЧИК',
+      icon: Icons.bed_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Планы на выходные',
+      body:
+          'План: провести скромные выходные дома за книгой и сохранить бюджет. Реальность: «Бро, поехали на шашлыки в горы!» — и минус 2500 сом из кошелька.',
+      actionLabel: '+ Записать',
+      statusTag: 'ВЫХОДНЫЕ • ШАШЛЫКИ В ГОРАХ',
+      icon: Icons.landscape_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Рассрочка без переплат',
+      body:
+          'Смартфон в рассрочку на 24 месяца: ноль переплат банку, сто процентов гарантии, что следующие два года ты будешь дышать воздухом вместо обеда.',
+      actionLabel: '+ Записать',
+      statusTag: 'РАССРОЧКА • ФИЛОСОФИЯ',
+      icon: Icons.phone_android_rounded,
+      mood: 'alert',
+    ),
+    CapybaraInsight(
+      title: 'Дзен горячих источников',
+      body:
+          'Капибара сидит в горячих источниках Иссык-Аты. Деньги — это просто инструмент, а внутренний покой бесценен. Зафиксируй день и отдыхай.',
+      actionLabel: 'Спасти стрик',
+      statusTag: 'ИССЫК-АТА • ПОЛНЫЙ ДЗЕН',
+      icon: Icons.hot_tub_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Волк с проспекта Чуй',
+      body:
+          'Купил актив на 400 сом. Обновляю приложение каждые сорок секунд с видом финансового магната. Доход: плюс 80 тыйынов. Жизнь удалась.',
+      actionLabel: 'В копилку',
+      statusTag: 'БИШКЕК • ВОЛК С ЧУЯ',
+      icon: Icons.auto_graph_rounded,
+      mood: 'boss',
+    ),
+    CapybaraInsight(
+      title: 'Урок финансового дзена',
+      body:
+          'Капибара знает: лучший способ сохранить 1000 сом — это просто не покупать то, без чего можно обойтись. Пей чай и наслаждайся моментом.',
+      actionLabel: '+ Записать',
+      statusTag: 'РЕЖИМ ДЗЕН • НА РАССЛАБОНЕ',
+      icon: Icons.spa_rounded,
+      mood: 'zen',
+    ),
+    CapybaraInsight(
+      title: 'Мудрость банкомата',
+      body:
+          'Банкомат передавал привет! Сказал, что уважает твой покой и просил заходить только за снятием кэша на приятные радости жизни.',
+      actionLabel: 'В копилку',
+      statusTag: 'ПОЛНЫЙ ЧИЛЛ • БАНКОМАТ',
+      icon: Icons.atm_rounded,
+      mood: 'boss',
+    ),
+  ];
 
   /// Dynamic Capybara Zen Notification ("стиль поведение на чиле на расслабоне, понимает что происходит с бюджетом")
   void triggerCapybaraZenNotification({

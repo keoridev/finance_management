@@ -15,7 +15,10 @@ import '../widgets/widget_installation_guide_modal.dart';
 import 'mbank_sync_screen.dart';
 import 'recurring_payments_screen.dart';
 import 'splash_screen.dart';
+import 'archived_transactions_screen.dart';
 import '../services/storage_service.dart';
+import '../services/ai_roast_service.dart';
+import '../services/widget_launch_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   final FinanceController controller;
@@ -51,12 +54,14 @@ class SettingsScreen extends StatelessWidget {
             onPressed: () => Navigator.of(context).pop(),
           ),
         ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 580),
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              children: [
+        body: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 580),
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                children: [
                 // 1. Курс валют (НБКР) — СРАЗУ виден без списков и скрытий
                 CurrencyRatesCard(controller: controller),
                 const SizedBox(height: 20),
@@ -147,6 +152,14 @@ class SettingsScreen extends StatelessWidget {
                           );
                         },
                       ),
+                      _buildDivider(),
+                      _buildSettingsTile(
+                        icon: Icons.key_rounded,
+                        iconColor: const Color(0xFF00E5FF),
+                        title: 'API-ключ Gemini (Google AI)',
+                        subtitle: 'Для распознавания чеков с камеры и Прожарки',
+                        onTap: () => _showApiKeyModal(context),
+                      ),
                     ],
                   ),
                 ),
@@ -161,6 +174,17 @@ class SettingsScreen extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Column(
                     children: [
+                      _buildSettingsSwitchTile(
+                        icon: Icons.pets_rounded,
+                        iconColor: AppColors.capybaraAmber,
+                        title: 'Показ Капибары на главном экране',
+                        subtitle: 'Мемный маскот, финансовые предсказания и мысли',
+                        value: controller.capybaraWidgetEnabled,
+                        onChanged: (val) {
+                          controller.toggleCapybaraWidget(val);
+                        },
+                      ),
+                      _buildDivider(),
                       _buildSettingsTile(
                         icon: Icons.notifications_active_rounded,
                         iconColor: const Color(0xFFFF9F0A),
@@ -181,6 +205,17 @@ class SettingsScreen extends StatelessWidget {
                               builder: (_) => SplashScreen(controller: controller),
                             ),
                           );
+                        },
+                      ),
+                      _buildDivider(),
+                      _buildSettingsTile(
+                        icon: Icons.mark_chat_unread_rounded,
+                        iconColor: const Color(0xFF00E5FF),
+                        title: 'Доступ к уведомлениям Android',
+                        subtitle: 'Разрешение для автоматического чтения пушей MBank/GPay',
+                        onTap: () async {
+                          HapticFeedback.lightImpact();
+                          await WidgetLaunchService.openNotificationListenerSettings();
                         },
                       ),
                     ],
@@ -241,6 +276,21 @@ class SettingsScreen extends StatelessWidget {
                       ),
                       _buildDivider(),
                       _buildSettingsTile(
+                        icon: Icons.inventory_2_rounded,
+                        iconColor: const Color(0xFFFF9F0A),
+                        title: 'Архив удалённых операций',
+                        subtitle: '${controller.archivedTransactions.length} операций • Восстановление в 1 тап',
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(context).push(
+                            CupertinoPageRoute(
+                              builder: (_) => ArchivedTransactionsScreen(controller: controller),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildDivider(),
+                      _buildSettingsTile(
                         icon: Icons.delete_outline_rounded,
                         iconColor: const Color(0xFFFF453A),
                         title: 'Сбросить данные приложения',
@@ -292,8 +342,9 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSectionHeader(String title) {
     return Padding(
@@ -374,6 +425,64 @@ class SettingsScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsSwitchTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: iconColor),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            activeTrackColor: AppColors.capybaraAmber,
+            activeThumbColor: Colors.white,
+            onChanged: (val) {
+              HapticFeedback.selectionClick();
+              onChanged(val);
+            },
+          ),
+        ],
       ),
     );
   }
@@ -1221,6 +1330,102 @@ class SettingsScreen extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showApiKeyModal(BuildContext context) async {
+    final currentKey = await AIRoastService.getApiKey() ?? '';
+    if (!context.mounted) return;
+
+    final textController = TextEditingController(text: currentKey);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.vpn_key_rounded, color: Color(0xFF00E5FF), size: 22),
+            SizedBox(width: 10),
+            Text(
+              'Gemini / Google AI Studio',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Введите ваш API-ключ Gemini для автоматического распознавания чеков, меню и токсичной Прожарки от Капибары.',
+              style: TextStyle(color: Color(0xFF8E8E93), fontSize: 13, height: 1.3),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: textController,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'AIzaSy...',
+                hintStyle: const TextStyle(color: Colors.white38),
+                filled: true,
+                fillColor: const Color(0xFF2C2C2E),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (currentKey.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await AIRoastService.saveApiKey('');
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('API-ключ удален')),
+                  );
+                }
+              },
+              child: const Text('Удалить', style: TextStyle(color: Colors.redAccent)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Отмена', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00E5FF),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              final key = textController.text.trim();
+              Navigator.of(ctx).pop();
+              await AIRoastService.saveApiKey(key);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(0xFF1C1C1E),
+                    content: Text(
+                      key.isNotEmpty ? 'API-ключ Gemini успешно сохранен!' : 'API-ключ очищен',
+                      style: const TextStyle(color: Color(0xFF00FF88)),
+                    ),
+                  ),
+                );
+              }
+            },
+            child: const Text('Сохранить', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),

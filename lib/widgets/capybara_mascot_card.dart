@@ -272,8 +272,11 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.controller.capybaraWidgetEnabled) {
+      return const SizedBox.shrink();
+    }
+
     final health = widget.controller.capybaraHealth;
-    final moodTitle = widget.controller.capybaraMoodTitle;
     final moodComment = widget.controller.capybaraMoodComment;
     final moodImagePath = widget.controller.capybaraMoodImagePath;
     final healthColor = _getHealthColor(health);
@@ -319,6 +322,9 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
                       child: Image.asset(
                         moodImagePath,
                         fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Center(
+                          child: Text('🦫', style: TextStyle(fontSize: 28)),
+                        ),
                       ),
                     ),
                   ),
@@ -333,10 +339,10 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
                   children: [
                     Row(
                       children: [
-                        Flexible(
+                        const Expanded(
                           child: Text(
-                            moodTitle,
-                            style: const TextStyle(
+                            'Маскот Капибара',
+                            style: TextStyle(
                               fontSize: 14.5,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
@@ -480,25 +486,32 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Icon(
-                            _showMemeAdvice ? Icons.auto_awesome_rounded : Icons.spa_rounded,
-                            size: 12,
-                            color: AppColors.capybaraAmber,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            _showMemeAdvice ? 'МУДРОСТЬ КАПИБАРЫ' : 'ТЕКУЩИЙ НАСТРОЙ',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Icon(
+                              _showMemeAdvice ? Icons.auto_awesome_rounded : Icons.spa_rounded,
+                              size: 12,
                               color: AppColors.capybaraAmber,
-                              letterSpacing: 0.5,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text(
+                                _showMemeAdvice ? 'МУДРОСТЬ КАПИБАРЫ' : 'ТЕКУЩИЙ НАСТРОЙ',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.capybaraAmber,
+                                  letterSpacing: 0.5,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
@@ -511,7 +524,7 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
                             Icon(Icons.refresh_rounded, size: 9, color: AppColors.capybaraAmber),
                             SizedBox(width: 3),
                             Text(
-                              'ДРУГОЙ СОВЕТ',
+                              'СОВЕТ',
                               style: TextStyle(
                                 fontSize: 8,
                                 fontWeight: FontWeight.w800,

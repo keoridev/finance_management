@@ -10,6 +10,8 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
+import java.util.regex.Pattern
+
 class MBankNotificationListenerService : NotificationListenerService() {
 
     companion object {
@@ -60,14 +62,35 @@ class MBankNotificationListenerService : NotificationListenerService() {
             val combined = "$title $text $bigText".trim()
             if (combined.isEmpty()) return
 
-            // Filter for Kyrgyz bank or banking SMS notifications
-            val isMBankPackage = pkg.contains("mbank") || pkg.contains("cbk")
-            val containsMBankKeyword = combined.contains("mbank", ignoreCase = true) ||
-                    title.contains("mbank", ignoreCase = true)
+            // 1. Bank & NFC Wallet packages
+            val isBankOrWalletPackage = pkg.contains("mbank") || pkg.contains("cbk") ||
+                    pkg.contains("optima") || pkg.contains("bakai") ||
+                    pkg.contains("demir") || pkg.contains("finca") ||
+                    pkg.contains("rsk") || pkg.contains("kompanion") ||
+                    pkg.contains("walletnfcrel") || pkg.contains("wallet") ||
+                    pkg.contains("gms") || pkg.contains("pay")
+
+            // 2. SMS packages
+            val isSmsPackage = pkg.contains("messaging") || pkg.contains("mms") ||
+                    pkg.contains("sms") || pkg.contains("message")
+
+            // 3. Keyword checks
+            val containsBankOrWalletKeyword = combined.contains("mbank", ignoreCase = true) ||
+                    combined.contains("optima", ignoreCase = true) ||
+                    combined.contains("bakai", ignoreCase = true) ||
+                    combined.contains("demir", ignoreCase = true) ||
+                    combined.contains("finca", ignoreCase = true) ||
+                    combined.contains("rsk", ignoreCase = true) ||
+                    combined.contains("kompanion", ignoreCase = true) ||
+                    combined.contains("google pay", ignoreCase = true) ||
+                    combined.contains("google wallet", ignoreCase = true) ||
+                    combined.contains("gpay", ignoreCase = true)
 
             val hasCurrency = combined.contains("сом", ignoreCase = true) ||
                     combined.contains("KGS", ignoreCase = true) ||
-                    combined.contains("kgs", ignoreCase = true)
+                    combined.contains("kgs", ignoreCase = true) ||
+                    combined.contains("som", ignoreCase = true) ||
+                    Pattern.compile("\\d+\\s*(?:с\\.|c\\.|[cс]\\b)", Pattern.CASE_INSENSITIVE).matcher(combined).find()
 
             val hasTransactionAction = combined.contains("пополнен", ignoreCase = true) ||
                     combined.contains("зачислен", ignoreCase = true) ||
@@ -76,16 +99,36 @@ class MBankNotificationListenerService : NotificationListenerService() {
                     combined.contains("зарплат", ignoreCase = true) ||
                     combined.contains("перевод", ignoreCase = true) ||
                     combined.contains("покупк", ignoreCase = true) ||
+                    combined.contains("сняти", ignoreCase = true) ||
+                    combined.contains("чек", ignoreCase = true) ||
+                    combined.contains("platezh", ignoreCase = true) ||
                     combined.contains("popolnen", ignoreCase = true) ||
-                    combined.contains("spisanie", ignoreCase = true)
+                    combined.contains("spisanie", ignoreCase = true) ||
+                    combined.contains("oplata", ignoreCase = true) ||
+                    combined.contains("paid", ignoreCase = true) ||
+                    combined.contains("spent", ignoreCase = true) ||
+                    combined.contains("purchase", ignoreCase = true)
 
-            if (!isMBankPackage && !containsMBankKeyword && !(hasCurrency && hasTransactionAction)) {
+            val shouldCapture = when {
+                isBankOrWalletPackage && (hasCurrency || hasTransactionAction || containsBankOrWalletKeyword) -> true
+                isSmsPackage && (containsBankOrWalletKeyword || (hasCurrency && hasTransactionAction)) -> true
+                hasCurrency && hasTransactionAction -> true
+                else -> false
+            }
+
+            if (!shouldCapture) {
                 return
             }
 
-            Log.d(TAG, "Captured bank transaction notification from [$pkg]: $title -> $text")
+            Log.d(TAG, "Captured bank transaction notification from [$pkg]: $title -> $text | $bigText")
 
-            val bestBody = if (text.isNotEmpty()) text else bigText
+            val bestBody = when {
+                bigText.isNotEmpty() && !bigText.equals(text, ignoreCase = true) -> {
+                    if (bigText.contains(text, ignoreCase = true)) bigText else "$text. $bigText"
+                }
+                text.isNotEmpty() -> text
+                else -> bigText
+            }
             savePendingNotification(title, bestBody, sbn.postTime)
 
             // Broadcast to MainActivity if active
@@ -109,13 +152,15 @@ class MBankNotificationListenerService : NotificationListenerService() {
                 ?: "[]"
 
             val jsonArray = JSONArray(existingJson)
-            // Prevent storing identical notification within short window
-            if (jsonArray.length() > 0) {
-                val lastObj = jsonArray.getJSONObject(jsonArray.length() - 1)
-                val lastRaw = lastObj.optString("rawText", "")
-                val lastTime = lastObj.optLong("timestamp", 0)
-                if (lastRaw == "$title: $body" && Math.abs(timestamp - lastTime) < 3000) {
-                    return // Duplicate within 3 seconds, ignore
+            // Prevent storing identical notification within 5 minutes
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.optJSONObject(i)
+                if (obj != null) {
+                    val prevRaw = obj.optString("rawText", "")
+                    val prevTime = obj.optLong("timestamp", 0)
+                    if ((prevRaw == "$title: $body" || prevRaw.contains(body) || body.contains(prevRaw)) && Math.abs(timestamp - prevTime) < 300_000L) {
+                        return // Duplicate within 5 minutes, ignore
+                    }
                 }
             }
 

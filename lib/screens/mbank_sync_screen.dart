@@ -585,6 +585,21 @@ class _MBankSyncScreenState extends State<MBankSyncScreen> with WidgetsBindingOb
                             ),
                           ),
                         ),
+                        const Spacer(),
+                        Switch.adaptive(
+                          value: widget.controller.capybaraFilterEnabled && isOverlayGranted,
+                          activeTrackColor: accentColor,
+                          activeThumbColor: Colors.white,
+                          onChanged: (val) async {
+                            if (val && !isOverlayGranted) {
+                              await WidgetLaunchService.requestOverlayPermission();
+                              _checkPermissionAndPending();
+                            } else {
+                              widget.controller.toggleCapybaraFilter(val);
+                              setState(() {});
+                            }
+                          },
+                        ),
                       ],
                     ),
                     const SizedBox(height: 3),

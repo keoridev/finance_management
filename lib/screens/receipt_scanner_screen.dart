@@ -277,8 +277,6 @@ class _ReceiptScannerScreenState extends State<ReceiptScannerScreen>
   Widget build(BuildContext context) {
     final receipt = _currentReceipt;
     final total = receipt?.totalAmount ?? 0.0;
-    final step = widget.controller.smartRoundUpStep;
-    final remainder = (step - (total.toInt() % step)) % step;
 
     final impulseItem = receipt?.items.firstWhere(
       (i) => i.isImpulseOrJunk,
@@ -647,29 +645,6 @@ class _ReceiptScannerScreenState extends State<ReceiptScannerScreen>
                                 ),
                               ],
                             ),
-                            if (remainder > 0) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0x2600C7BE),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: const Color(0xFF00C7BE)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    const Text(
-                                      'В КОПИЛКУ (MAC M3)',
-                                      style: TextStyle(color: Color(0xFF00C7BE), fontSize: 9.5, fontWeight: FontWeight.w800),
-                                    ),
-                                    Text(
-                                      '+$remainder сом',
-                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                         const SizedBox(height: 14),
@@ -685,11 +660,9 @@ class _ReceiptScannerScreenState extends State<ReceiptScannerScreen>
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                               elevation: 0,
                             ),
-                            child: Text(
-                              remainder > 0
-                                  ? 'Записать чек (+$remainder с в копилку)'
-                                  : 'Записать расход в ARC',
-                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+                            child: const Text(
+                              'Записать расход в ARC',
+                              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
                             ),
                           ),
                         ),

@@ -37,10 +37,29 @@ class DatabaseService {
     }
   }
 
+  static Future<void> _ensureArchivedTable(Database db) async {
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS archived_transactions (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          amount REAL NOT NULL,
+          date INTEGER NOT NULL,
+          type INTEGER NOT NULL,
+          category_id TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          to_account_id TEXT,
+          note TEXT
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_archived_tx_date ON archived_transactions(date DESC)');
+    } catch (_) {}
+  }
+
   Future<Database> _initDatabase() async {
     try {
       if (mockDatabaseFactory != null) {
-        return await mockDatabaseFactory!.openDatabase(
+        final db = await mockDatabaseFactory!.openDatabase(
           inMemoryDatabasePath,
           options: OpenDatabaseOptions(
             version: dbVersion,
@@ -48,25 +67,31 @@ class DatabaseService {
             onCreate: _onCreate,
           ),
         );
+        await _ensureArchivedTable(db);
+        return db;
       }
 
       final dbPath = await getDatabasesPath();
       final path = p.join(dbPath, dbName);
 
-      return await openDatabase(
+      final db = await openDatabase(
         path,
         version: dbVersion,
         onConfigure: _onConfigure,
         onCreate: _onCreate,
       );
+      await _ensureArchivedTable(db);
+      return db;
     } catch (e) {
       debugPrint('[DatabaseService] Failed to open standard DB, falling back to memory DB: $e');
-      return await openDatabase(
+      final db = await openDatabase(
         inMemoryDatabasePath,
         version: dbVersion,
         onConfigure: _onConfigure,
         onCreate: _onCreate,
       );
+      await _ensureArchivedTable(db);
+      return db;
     }
   }
 
@@ -112,6 +137,22 @@ class DatabaseService {
     batch.execute('CREATE INDEX idx_tx_date ON transactions(date DESC)');
     batch.execute('CREATE INDEX idx_tx_account ON transactions(account_id)');
     batch.execute('CREATE INDEX idx_tx_category ON transactions(category_id)');
+
+    // 2b. Archived Transactions Table
+    batch.execute('''
+      CREATE TABLE archived_transactions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        amount REAL NOT NULL,
+        date INTEGER NOT NULL,
+        type INTEGER NOT NULL,
+        category_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        to_account_id TEXT,
+        note TEXT
+      )
+    ''');
+    batch.execute('CREATE INDEX idx_archived_tx_date ON archived_transactions(date DESC)');
 
     // 3. Categories Table
     batch.execute('''
@@ -245,6 +286,7 @@ class DatabaseService {
   Future<void> saveFullState({
     required List<Account> accounts,
     required List<Transaction> transactions,
+    List<Transaction> archivedTransactions = const [],
     required List<TransactionCategory> categories,
     required List<CategoryBudget> budgets,
     required List<SavingsGoal> savingsGoals,
@@ -291,6 +333,26 @@ class DatabaseService {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await batchTx.commit(noResult: true);
+
+      // 2b. Archived Transactions
+      try {
+        await txn.delete('archived_transactions');
+        final batchArchived = txn.batch();
+        for (final t in archivedTransactions) {
+          batchArchived.insert('archived_transactions', {
+            'id': t.id,
+            'title': t.title,
+            'amount': t.amount,
+            'date': t.date.millisecondsSinceEpoch,
+            'type': t.type.index,
+            'category_id': t.categoryId,
+            'account_id': t.accountId,
+            'to_account_id': t.toAccountId,
+            'note': t.note,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        await batchArchived.commit(noResult: true);
+      } catch (_) {}
 
       // 3. Categories
       await txn.delete('categories');
@@ -401,6 +463,10 @@ class DatabaseService {
 
     final accountsRaw = await db.query('accounts');
     final txRaw = await db.query('transactions', orderBy: 'date DESC');
+    List<Map<String, Object?>> archivedRaw = [];
+    try {
+      archivedRaw = await db.query('archived_transactions', orderBy: 'date DESC');
+    } catch (_) {}
     final catRaw = await db.query('categories');
     final budgetRaw = await db.query('budgets');
     final goalsRaw = await db.query('savings_goals');
@@ -408,7 +474,7 @@ class DatabaseService {
     final shortRaw = await db.query('shortcuts');
     final metaRaw = await db.query('meta_kv');
 
-    if (accountsRaw.isEmpty && txRaw.isEmpty && metaRaw.isEmpty) {
+    if (accountsRaw.isEmpty && txRaw.isEmpty && archivedRaw.isEmpty && metaRaw.isEmpty) {
       return null; // Database is completely empty, trigger first run default seeding
     }
 
@@ -437,6 +503,23 @@ class DatabaseService {
       return Transaction(
         id: m['id'] as String? ?? 'tx_${DateTime.now().millisecondsSinceEpoch}',
         title: m['title'] as String? ?? 'Операция',
+        amount: (m['amount'] as num?)?.toDouble() ?? 0.0,
+        date: DateTime.fromMillisecondsSinceEpoch(dateMs),
+        type: TransactionType.values[typeIndex.clamp(0, TransactionType.values.length - 1)],
+        categoryId: m['category_id'] as String? ?? 'cat_other',
+        accountId: m['account_id'] as String? ?? 'acc_mbank',
+        toAccountId: m['to_account_id'] as String?,
+        note: m['note'] as String?,
+      );
+    }).toList();
+
+    // 2b. Archived Transactions
+    result['archivedTransactions'] = archivedRaw.map((m) {
+      final typeIndex = (m['type'] as num?)?.toInt() ?? 0;
+      final dateMs = (m['date'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+      return Transaction(
+        id: m['id'] as String? ?? 'tx_archived_${DateTime.now().millisecondsSinceEpoch}',
+        title: m['title'] as String? ?? 'Архивная операция',
         amount: (m['amount'] as num?)?.toDouble() ?? 0.0,
         date: DateTime.fromMillisecondsSinceEpoch(dateMs),
         type: TransactionType.values[typeIndex.clamp(0, TransactionType.values.length - 1)],
@@ -539,6 +622,7 @@ class DatabaseService {
       'exported_at': DateTime.now().toIso8601String(),
       'accounts': await db.query('accounts'),
       'transactions': await db.query('transactions'),
+      'archived_transactions': await db.query('archived_transactions'),
       'categories': await db.query('categories'),
       'budgets': await db.query('budgets'),
       'savings_goals': await db.query('savings_goals'),
@@ -562,6 +646,7 @@ class DatabaseService {
         // Clear all tables
         await txn.delete('accounts');
         await txn.delete('transactions');
+        try { await txn.delete('archived_transactions'); } catch (_) {}
         await txn.delete('categories');
         await txn.delete('budgets');
         await txn.delete('savings_goals');
@@ -580,6 +665,15 @@ class DatabaseService {
         if (data['transactions'] is List) {
           for (final row in data['transactions']) {
             await txn.insert('transactions', Map<String, dynamic>.from(row));
+          }
+        }
+
+        // Restore archived transactions
+        if (data['archived_transactions'] is List) {
+          for (final row in data['archived_transactions']) {
+            try {
+              await txn.insert('archived_transactions', Map<String, dynamic>.from(row));
+            } catch (_) {}
           }
         }
 
@@ -667,6 +761,7 @@ class DatabaseService {
       await db.transaction((txn) async {
         await txn.delete('accounts');
         await txn.delete('transactions');
+        try { await txn.delete('archived_transactions'); } catch (_) {}
         await txn.delete('categories');
         await txn.delete('budgets');
         await txn.delete('savings_goals');

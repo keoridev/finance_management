@@ -62,6 +62,9 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.controller.capybaraWidgetEnabled) {
+      return const SizedBox.shrink();
+    }
     final insight = NotificationController.getDynamicInsight(
       widget.controller,
       offset: _memeIndex,
@@ -127,6 +130,9 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                         child: Image.asset(
                           moodImage,
                           fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Text('🦫', style: TextStyle(fontSize: 24)),
+                          ),
                         ),
                       ),
                     ),
@@ -314,6 +320,7 @@ class _CapybaraMemeOracleSheet extends StatefulWidget {
 
 class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
   String _selectedFilter = 'Все';
+  late final List<CapybaraInsight> _allMemes;
 
   static const List<String> _filters = [
     'Все',
@@ -325,20 +332,23 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
   ];
 
   @override
-  Widget build(BuildContext context) {
-    // Generate pool of 35 items
-    final List<CapybaraInsight> allMemes = [];
-    for (int i = 0; i < 40; i++) {
-      final item = NotificationController.getDynamicInsight(
-        widget.controller,
-        offset: i,
-      );
-      if (!allMemes.any((m) => m.title == item.title)) {
-        allMemes.add(item);
+  void initState() {
+    super.initState();
+    final rawPool = NotificationController.getAllInsightsPool(widget.controller);
+    final List<CapybaraInsight> uniqueMemes = [];
+    final Set<String> seen = {};
+    for (final m in rawPool) {
+      if (!seen.contains(m.title)) {
+        seen.add(m.title);
+        uniqueMemes.add(m);
       }
     }
+    _allMemes = uniqueMemes;
+  }
 
-    final filtered = allMemes.where((m) {
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _allMemes.where((m) {
       if (_selectedFilter == 'Все') return true;
       if (_selectedFilter == 'Бишкек') {
         return m.title.contains('Бишкек') ||

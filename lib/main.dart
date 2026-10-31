@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/splash_screen.dart';
+import 'services/merchant_memory_service.dart';
 import 'services/widget_launch_service.dart';
 import 'state/finance_controller.dart';
 import 'theme/app_theme.dart';
@@ -8,6 +9,7 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await MerchantMemoryService.init();
   final controller = FinanceController();
   await controller.loadFromStorage();
 
@@ -18,6 +20,7 @@ void main() async {
       isWinterChecked: controller.isWinterCheckedToday,
       accountName: controller.activeAccountLabel,
       todaySpent: controller.todaySpentLabel,
+      quickButtons: controller.quickButtonsForWidget,
     );
     await WidgetLaunchService.syncCapyPrediction(
       title: 'ПРЕДСКАЗАНИЕ КАПИБАРЫ',

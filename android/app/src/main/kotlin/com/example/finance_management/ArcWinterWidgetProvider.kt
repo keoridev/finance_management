@@ -43,9 +43,15 @@ class ArcWinterWidgetProvider : AppWidgetProvider() {
 
                 try {
                     val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    streak = prefs.getInt("flutter.arc_widget_winter_streak", -1)
-                        .takeIf { it >= 0 }
-                        ?: prefs.getInt("arc_widget_winter_streak", 0)
+                    streak = try {
+                        prefs.getLong("flutter.arc_widget_winter_streak", -1L).toInt()
+                    } catch (_: ClassCastException) {
+                        prefs.getInt("flutter.arc_widget_winter_streak", -1)
+                    }.takeIf { it >= 0 } ?: try {
+                        prefs.getLong("arc_widget_winter_streak", 0L).toInt()
+                    } catch (_: ClassCastException) {
+                        prefs.getInt("arc_widget_winter_streak", 0)
+                    }
 
                     isChecked = prefs.getBoolean("flutter.arc_widget_winter_checked", false)
                         || prefs.getBoolean("arc_widget_winter_checked", false)

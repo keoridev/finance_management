@@ -12,7 +12,7 @@ import '../widgets/empty_state_view.dart';
 import '../widgets/glass_skeleton.dart';
 import '../widgets/transaction_success_overlay.dart';
 import '../widgets/transaction_tile.dart';
-import '../widgets/capybara_meme_bubble.dart';
+import '../widgets/capybara_mascot_card.dart';
 import '../widgets/quick_shortcuts_section.dart';
 import 'killer_features_screen.dart';
 import 'mbank_sync_screen.dart';
@@ -240,8 +240,8 @@ class DashboardScreen extends StatelessWidget {
             ),
             const SizedBox(height: 14),
 
-            // 2. Интерактивная мысль и мем Капибары
-            CapybaraMemeBubble(controller: controller),
+            // 2. Интерактивный Маскот Капибара
+            CapybaraMascotCard(controller: controller),
             const SizedBox(height: 18),
 
             // 3. Быстрые платежи в 1 тап (Маршрутка, Кофе, Обед...)
@@ -460,7 +460,44 @@ class DashboardScreen extends StatelessWidget {
                     transaction: tx,
                     category: category,
                     account: account,
-                    onDelete: () => controller.deleteTransaction(tx.id),
+                    onDelete: () {
+                      final deletedTx = tx;
+                      controller.deleteTransaction(tx.id);
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: const Color(0xFF1C1C1E),
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                          ),
+                          content: Row(
+                            children: [
+                              const Icon(Icons.archive_outlined, color: Color(0xFFFF9F0A), size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '«${deletedTx.title}» в архиве',
+                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          action: SnackBarAction(
+                            label: 'ВЕРНУТЬ',
+                            textColor: const Color(0xFFFF9F0A),
+                            onPressed: () {
+                              HapticFeedback.mediumImpact();
+                              controller.restoreTransaction(deletedTx.id);
+                            },
+                          ),
+                          duration: const Duration(seconds: 4),
+                        ),
+                      );
+                    },
                     onDuplicate: () {
                       controller.duplicateTransaction(tx);
                       TransactionSuccessOverlay.show(

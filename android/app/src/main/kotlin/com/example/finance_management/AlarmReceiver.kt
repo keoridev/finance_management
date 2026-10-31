@@ -17,8 +17,12 @@ class AlarmReceiver : BroadcastReceiver() {
         val body = intent?.getStringExtra("body") ?: "Не забудьте записать расходы и проверить Winter Arc!"
         val id = intent?.getIntExtra("id", System.currentTimeMillis().toInt()) ?: System.currentTimeMillis().toInt()
 
+        val quickAction = intent?.getStringExtra("quick_action")
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (quickAction != null) {
+                putExtra("quick_action", quickAction)
+            }
         }
         val pendingIntent = PendingIntent.getActivity(
             context,

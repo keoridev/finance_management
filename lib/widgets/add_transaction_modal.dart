@@ -12,24 +12,38 @@ import 'transaction_success_overlay.dart';
 class AddTransactionModal extends StatefulWidget {
   final FinanceController controller;
   final TransactionType initialType;
+  final double? initialAmount;
+  final String? initialTitle;
+  final String? initialNote;
 
   const AddTransactionModal({
     super.key,
     required this.controller,
     this.initialType = TransactionType.expense,
+    this.initialAmount,
+    this.initialTitle,
+    this.initialNote,
   });
 
   static Future<void> show(
     BuildContext context,
     FinanceController controller, {
     TransactionType defaultType = TransactionType.expense,
+    double? initialAmount,
+    String? initialTitle,
+    String? initialNote,
   }) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) =>
-          AddTransactionModal(controller: controller, initialType: defaultType),
+      builder: (ctx) => AddTransactionModal(
+        controller: controller,
+        initialType: defaultType,
+        initialAmount: initialAmount,
+        initialTitle: initialTitle,
+        initialNote: initialNote,
+      ),
     );
   }
 
@@ -56,6 +70,16 @@ class _AddTransactionModalState extends State<AddTransactionModal> {
     final firstAcc = widget.controller.accounts.firstOrNull;
     _selectedAccountId = firstAcc?.id ?? '';
     _updateDefaultCategory();
+
+    if (widget.initialAmount != null && widget.initialAmount! > 0) {
+      _amountController.text = widget.initialAmount!.toStringAsFixed(widget.initialAmount! % 1 == 0 ? 0 : 2);
+    }
+    if (widget.initialTitle != null && widget.initialTitle!.isNotEmpty) {
+      _titleController.text = widget.initialTitle!;
+    }
+    if (widget.initialNote != null && widget.initialNote!.isNotEmpty) {
+      _noteController.text = widget.initialNote!;
+    }
 
     _amountFocusNode.addListener(() {
       if (mounted) {

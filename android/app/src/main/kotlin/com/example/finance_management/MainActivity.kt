@@ -11,6 +11,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -36,9 +37,48 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        sanitizeFlutterSharedPreferences()
         createNotificationChannel()
         handleIntent(intent)
         preloadWidgetFromCache()
+    }
+
+    private fun getSafeInt(prefs: SharedPreferences, key: String, defValue: Int = 0): Int {
+        return try {
+            prefs.getLong(key, defValue.toLong()).toInt()
+        } catch (_: ClassCastException) {
+            try {
+                prefs.getInt(key, defValue)
+            } catch (_: Exception) {
+                defValue
+            }
+        } catch (_: Exception) {
+            defValue
+        }
+    }
+
+    private fun sanitizeFlutterSharedPreferences() {
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val allEntries = prefs.all
+            val editor = prefs.edit()
+            var modified = false
+            for ((key, value) in allEntries) {
+                if (value is Int) {
+                    editor.remove(key)
+                    editor.putLong(key, value.toLong())
+                    modified = true
+                } else if (value !is String && value !is Boolean && value !is Long && value !is Double && value !is Float) {
+                    editor.remove(key)
+                    modified = true
+                }
+            }
+            if (modified) {
+                editor.commit()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun preloadWidgetFromCache() {
@@ -46,9 +86,9 @@ class MainActivity : FlutterActivity() {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val balance = prefs.getString("flutter.arc_widget_balance_display", null)
                 ?: prefs.getString("arc_widget_balance_display", null) ?: "0,00 сом"
-            val streak = prefs.getInt("flutter.arc_widget_winter_streak", -1)
+            val streak = getSafeInt(prefs, "flutter.arc_widget_winter_streak", -1)
                 .takeIf { it >= 0 }
-                ?: prefs.getInt("arc_widget_winter_streak", 0)
+                ?: getSafeInt(prefs, "arc_widget_winter_streak", 0)
             val isChecked = prefs.getBoolean("flutter.arc_widget_winter_checked", false)
                 || prefs.getBoolean("arc_widget_winter_checked", false)
             updateWidgetData(balance, streak, isChecked)
@@ -59,6 +99,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        sanitizeFlutterSharedPreferences()
         setupBankNotificationReceiver()
     }
 
@@ -95,6 +136,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        sanitizeFlutterSharedPreferences()
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WIDGET_CHANNEL)
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -114,7 +156,8 @@ class MainActivity : FlutterActivity() {
                     val isWinterChecked = call.argument<Boolean>("isWinterChecked") ?: false
                     val accountName = call.argument<String>("accountName")
                     val todaySpent = call.argument<String>("todaySpent")
-                    updateWidgetData(balance, streak, isWinterChecked, accountName, todaySpent)
+                    val quickButtons = call.argument<List<Map<String, Any>>>("quickButtons")
+                    updateWidgetData(balance, streak, isWinterChecked, accountName, todaySpent, quickButtons)
                     result.success(true)
                 }
                 "requestNotificationPermission" -> {
@@ -155,11 +198,31 @@ class MainActivity : FlutterActivity() {
                     updateCapyData(title, body, tag)
                     result.success(true)
                 }
+                "syncFloatingCapy" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    try {
+                        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                        prefs.edit()
+                            .putBoolean("flutter.arc_floating_capy_enabled", enabled)
+                            .putBoolean("arc_floating_capy_enabled", enabled)
+                            .apply()
+                        if (!enabled) {
+                            MBankScreenAccessibilityService.dismissFloatingBubbleIfRunning()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    result.success(true)
+                }
                 "isNotificationListenerEnabled" -> {
                     result.success(isNotificationListenerPermissionGranted())
                 }
                 "openNotificationListenerSettings" -> {
                     openNotificationListenerSettings()
+                    result.success(true)
+                }
+                "openNotificationSettings" -> {
+                    openAppNotificationSettings()
                     result.success(true)
                 }
                 "isAccessibilityServiceEnabled" -> {
@@ -230,15 +293,16 @@ class MainActivity : FlutterActivity() {
         streak: Int = 0,
         isWinterChecked: Boolean = false,
         accountName: String? = null,
-        todaySpent: String? = null
+        todaySpent: String? = null,
+        quickButtons: List<Map<String, Any>>? = null
     ) {
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val editor = prefs.edit()
                 .putString("flutter.arc_widget_balance_display", balance)
                 .putString("arc_widget_balance_display", balance)
-                .putInt("flutter.arc_widget_winter_streak", streak)
-                .putInt("arc_widget_winter_streak", streak)
+                .putLong("flutter.arc_widget_winter_streak", streak.toLong())
+                .putLong("arc_widget_winter_streak", streak.toLong())
                 .putBoolean("flutter.arc_widget_winter_checked", isWinterChecked)
                 .putBoolean("arc_widget_winter_checked", isWinterChecked)
 
@@ -249,6 +313,22 @@ class MainActivity : FlutterActivity() {
             if (!todaySpent.isNullOrEmpty()) {
                 editor.putString("flutter.arc_widget_today_spent", todaySpent)
                 editor.putString("arc_widget_today_spent", todaySpent)
+            }
+            if (quickButtons != null) {
+                for (i in 0 until 4) {
+                    if (i < quickButtons.size) {
+                        val b = quickButtons[i]
+                        val title = b["title"] as? String ?: ""
+                        val amount = (b["amount"] as? Number)?.toDouble() ?: 0.0
+                        val cat = b["categoryId"] as? String ?: ""
+                        editor.putString("arc_widget_btn_${i}_title", title)
+                        editor.putString("flutter.arc_widget_btn_${i}_title", title)
+                        editor.putFloat("arc_widget_btn_${i}_amount", amount.toFloat())
+                        editor.putFloat("flutter.arc_widget_btn_${i}_amount", amount.toFloat())
+                        editor.putString("arc_widget_btn_${i}_cat", cat)
+                        editor.putString("flutter.arc_widget_btn_${i}_cat", cat)
+                    }
+                }
             }
             editor.apply()
 
@@ -427,9 +507,7 @@ class MainActivity : FlutterActivity() {
             val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
             if (flat != null && flat.contains(packageName)) return true
 
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            return prefs.getBoolean("flutter.arc_listener_confirmed_enabled", false) ||
-                    prefs.getBoolean("arc_listener_confirmed_enabled", false)
+            return false
         } catch (e: Exception) {
             return false
         }
@@ -446,6 +524,24 @@ class MainActivity : FlutterActivity() {
             startActivity(intent)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun openAppNotificationSettings() {
+        try {
+            val intent = Intent()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                intent.action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            } else {
+                intent.action = "android.settings.APP_NOTIFICATION_SETTINGS"
+                intent.putExtra("app_package", packageName)
+                intent.putExtra("app_uid", applicationInfo.uid)
+            }
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+        } catch (e: Exception) {
+            openNotificationListenerSettings()
         }
     }
 

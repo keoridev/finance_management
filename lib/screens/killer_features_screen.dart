@@ -27,7 +27,7 @@ class KillerFeaturesScreen extends StatefulWidget {
 
 class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
   bool _canDrawOverlays = false;
-  bool _floatingCapyEnabled = true;
+  bool _floatingCapyEnabled = false;
   bool _socialBlockerEnabled = true;
 
   @override
@@ -38,14 +38,12 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
 
   Future<void> _checkOverlayPermission() async {
     final canDraw = await WidgetLaunchService.canDrawOverlays();
-    final prefs = await SharedPreferences.getInstance();
-    final floatingEnabled = prefs.getBool('arc_floating_capy_enabled') ?? true;
-    final socialEnabled = prefs.getBool('arc_social_blocker_enabled') ?? true;
+    final isA11y = await WidgetLaunchService.isAccessibilityServiceEnabled();
+    final hasAccess = canDraw || isA11y;
     if (mounted) {
       setState(() {
-        _canDrawOverlays = canDraw;
-        _floatingCapyEnabled = floatingEnabled;
-        _socialBlockerEnabled = socialEnabled;
+        _canDrawOverlays = hasAccess;
+        _floatingCapyEnabled = widget.controller.floatingCapyEnabled;
       });
     }
   }
@@ -87,8 +85,8 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             title: 'Плавающая Капибара (Chat Head)',
             subtitle:
                 'Появляется поверх MBank и Оптимы. Тапнул по капибаре — открывается мини-шторка ARC FINANCE для моментальной записи без переключения приложений.',
-            badge: _canDrawOverlays ? 'АКТИВНА' : 'ТРЕБУЕТ ДОСТУП',
-            badgeColor: _canDrawOverlays ? const Color(0xFF30D158) : const Color(0xFFFF9F0A),
+            badge: (_floatingCapyEnabled && _canDrawOverlays) ? 'АКТИВНА' : (_canDrawOverlays ? 'ОТКЛ' : 'ТРЕБУЕТ ДОСТУП'),
+            badgeColor: (_floatingCapyEnabled && _canDrawOverlays) ? const Color(0xFF30D158) : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
               value: _floatingCapyEnabled && _canDrawOverlays,
               activeTrackColor: const Color(0xFF00C7BE),
@@ -98,8 +96,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                   await WidgetLaunchService.requestOverlayPermission();
                   _checkOverlayPermission();
                 } else {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('arc_floating_capy_enabled', val);
+                  widget.controller.toggleFloatingCapy(val);
                   setState(() => _floatingCapyEnabled = val);
                 }
               },
@@ -127,6 +124,30 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                     ),
                   )
                 : null,
+          ),
+          const SizedBox(height: 14),
+
+          // 1b. Capybara Pre-Transaction Filter
+          _buildFeatureCard(
+            title: 'Капибара-фильтр (До оплаты)',
+            subtitle:
+                'Перехватывает экран подтверждения перевода от 500 сом в MBank и маркетплейсах. Поверх экрана всплывает системное окно: «Точно переводим? А как же цель на $dreamGoalTitle?».',
+            badge: (widget.controller.capybaraFilterEnabled && _canDrawOverlays) ? 'АКТИВЕН' : (_canDrawOverlays ? 'ОТКЛ' : 'ТРЕБУЕТ ДОСТУП'),
+            badgeColor: (widget.controller.capybaraFilterEnabled && _canDrawOverlays) ? const Color(0xFF30D158) : const Color(0xFF8E8E93),
+            trailingWidget: Switch.adaptive(
+              value: widget.controller.capybaraFilterEnabled && _canDrawOverlays,
+              activeTrackColor: const Color(0xFF00C7BE),
+              activeThumbColor: Colors.white,
+              onChanged: (val) async {
+                if (val && !_canDrawOverlays) {
+                  await WidgetLaunchService.requestOverlayPermission();
+                  _checkOverlayPermission();
+                } else {
+                  widget.controller.toggleCapybaraFilter(val);
+                  setState(() {});
+                }
+              },
+            ),
           ),
           const SizedBox(height: 14),
 
@@ -167,60 +188,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
           ),
           const SizedBox(height: 14),
 
-          // 3. Smart Round-Up
-          _buildFeatureCard(
-            title: 'Умное округление в копилку',
-            subtitle:
-                'Каждый расход (например, 340 сом за кофе) округляется до ${controller.smartRoundUpStep} сом. Разница (+60 сом) автоматически падает в копилку на $dreamGoalTitle.',
-            badge: controller.smartRoundUpEnabled ? 'ВКЛЮЧЕНО' : 'ОТКЛ',
-            badgeColor: controller.smartRoundUpEnabled ? const Color(0xFF30D158) : const Color(0xFF8E8E93),
-            trailingWidget: Switch.adaptive(
-              value: controller.smartRoundUpEnabled,
-              activeTrackColor: const Color(0xFF00C7BE),
-              activeThumbColor: Colors.white,
-              onChanged: (val) {
-                controller.toggleSmartRoundUp(val);
-                setState(() {});
-              },
-            ),
-            customAction: controller.smartRoundUpEnabled
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Шаг округления: ',
-                          style: TextStyle(color: Color(0xFF8E8E93), fontSize: 12),
-                        ),
-                        ChoiceChip(
-                          label: const Text('до 50 сом', style: TextStyle(fontSize: 11)),
-                          selected: controller.smartRoundUpStep == 50,
-                          selectedColor: const Color(0xFF00C7BE),
-                          onSelected: (sel) {
-                            if (sel) {
-                              controller.setSmartRoundUpStep(50);
-                              setState(() {});
-                            }
-                          },
-                        ),
-                        const SizedBox(width: 8),
-                        ChoiceChip(
-                          label: const Text('до 100 сом', style: TextStyle(fontSize: 11)),
-                          selected: controller.smartRoundUpStep == 100,
-                          selectedColor: const Color(0xFF00C7BE),
-                          onSelected: (sel) {
-                            if (sel) {
-                              controller.setSmartRoundUpStep(100);
-                              setState(() {});
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(height: 14),
+
 
           // 4. AR Receipt Scanner
           _buildFeatureCard(
@@ -266,7 +234,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
           _buildFeatureCard(
             title: 'Блокиратор соцсетей (Hardcore Dictator)',
             subtitle:
-                'Раз уж у приложения есть системные права AccessibilityService, оно использует их как диктатор: при превышении дневного лимита трат моментально сворачивает Instagram, TikTok, YouTube и показывает системный экран: «Лимит пробит. Доступ закрыт, пока не сделаешь 20 подтягиваний».',
+                'Использует системные права AccessibilityService: при открытии Instagram, TikTok, YouTube показывает строгий полноэкранный экран Капибары-Диктатора поверх приложения. Никаких продлений на 15–20 минут! Доступ закрыт, пока не сделаешь 20 подтягиваний в ARC Finance или не закроешь соцсеть.',
             badge: _socialBlockerEnabled ? 'ЖЕСТКИЙ ДИКТАТОР' : 'ОТКЛ',
             badgeColor: _socialBlockerEnabled ? const Color(0xFFFF453A) : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
@@ -274,12 +242,16 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
               activeTrackColor: const Color(0xFFFF453A),
               activeThumbColor: Colors.white,
               onChanged: (val) async {
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setBool('arc_social_blocker_enabled', val);
+                try {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('arc_social_blocker_enabled', val);
+                  await prefs.setBool('arc_social_blocker_active', val);
+                  await prefs.setString('arc_social_blocker_mode', 'always');
+                } catch (_) {}
                 setState(() => _socialBlockerEnabled = val);
                 await WidgetLaunchService.syncSocialBlockerConfig(
                   enabled: val,
-                  isBlocked: widget.controller.isSocialBlockerActive,
+                  isBlocked: val,
                   dreamGoal: dreamGoalTitle,
                   pullupsRequired: 20,
                 );

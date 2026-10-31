@@ -310,6 +310,7 @@ class ReceiptVisionService {
         }
       });
 
+      debugPrint('[ReceiptVisionService] Sending Gemini Vision request (API key length: ${apiKey.length})');
       request.write(body);
       final response = await request.close();
 
@@ -319,15 +320,23 @@ class ReceiptVisionService {
         final candidateText =
             json['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
 
-        if (candidateText != null) {
-          final cleaned = candidateText
-              .replaceAll('```json', '')
-              .replaceAll('```', '')
-              .trim();
-          final parsed = jsonDecode(cleaned);
+        if (candidateText != null && candidateText.trim().isNotEmpty) {
+          // Strictly strip markdown code block fences (e.g. ```json ... ```)
+          String cleanedJson = candidateText.replaceAll(RegExp(r'```(?:json)?|```'), '').trim();
+
+          final firstBrace = cleanedJson.indexOf('{');
+          final lastBrace = cleanedJson.lastIndexOf('}');
+          if (firstBrace != -1 && lastBrace != -1 && lastBrace >= firstBrace) {
+            cleanedJson = cleanedJson.substring(firstBrace, lastBrace + 1);
+          }
+
+          final Map<String, dynamic> parsed = Map<String, dynamic>.from(jsonDecode(cleanedJson) as Map);
 
           final rawItems = parsed['items'] as List? ?? [];
-          final items = rawItems.map((m) => ReceiptItem.fromMap(m as Map<String, dynamic>)).toList();
+          final items = rawItems
+              .where((m) => m is Map)
+              .map((m) => ReceiptItem.fromMap(Map<String, dynamic>.from(m as Map)))
+              .toList();
           final total = (parsed['total'] as num?)?.toDouble() ??
               items.fold<double>(0.0, (s, i) => s + i.price);
 
