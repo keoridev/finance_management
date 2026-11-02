@@ -74,7 +74,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
             if (modified) {
-                editor.commit()
+                editor.apply()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -101,6 +101,18 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         sanitizeFlutterSharedPreferences()
         setupBankNotificationReceiver()
+        tryRebindNotificationListener()
+    }
+
+    private fun tryRebindNotificationListener() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                if (isNotificationListenerPermissionGranted()) {
+                    val component = ComponentName(this, MBankNotificationListenerService::class.java)
+                    android.service.notification.NotificationListenerService.requestRebind(component)
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -690,13 +702,21 @@ class MainActivity : FlutterActivity() {
                         val title = intent.getStringExtra("title") ?: ""
                         val body = intent.getStringExtra("body") ?: ""
                         val source = intent.getStringExtra("source") ?: "notification"
+                        val status = intent.getStringExtra("status") ?: "CONFIRMED_PUSH"
+                        val amount = intent.getDoubleExtra("amount", 0.0)
+                        val currency = intent.getStringExtra("currency") ?: "KGS"
+                        val targetIdentifier = intent.getStringExtra("targetIdentifier") ?: "UNKNOWN"
                         val timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis())
                         val payload = mapOf(
                             "title" to title,
                             "body" to body,
                             "timestamp" to timestamp,
-                            "rawText" to "$title: $body",
-                            "source" to source
+                            "rawText" to (intent.getStringExtra("rawText") ?: "$title: $body"),
+                            "source" to source,
+                            "status" to status,
+                            "amount" to amount,
+                            "currency" to currency,
+                            "targetIdentifier" to targetIdentifier
                         )
                         methodChannel?.invokeMethod("onBankNotificationReceived", payload)
                     }
@@ -715,13 +735,21 @@ class MainActivity : FlutterActivity() {
                         val title = intent.getStringExtra("title") ?: ""
                         val body = intent.getStringExtra("body") ?: ""
                         val source = intent.getStringExtra("source") ?: "accessibility_screen"
+                        val status = intent.getStringExtra("status") ?: "CONFIRMED_UI"
+                        val amount = intent.getDoubleExtra("amount", 0.0)
+                        val currency = intent.getStringExtra("currency") ?: "KGS"
+                        val targetIdentifier = intent.getStringExtra("targetIdentifier") ?: "UNKNOWN"
                         val timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis())
                         val payload = mapOf(
                             "title" to title,
                             "body" to body,
                             "timestamp" to timestamp,
                             "rawText" to (intent.getStringExtra("rawText") ?: "$title: $body"),
-                            "source" to source
+                            "source" to source,
+                            "status" to status,
+                            "amount" to amount,
+                            "currency" to currency,
+                            "targetIdentifier" to targetIdentifier
                         )
                         methodChannel?.invokeMethod("onBankNotificationReceived", payload)
                     }
@@ -742,6 +770,18 @@ class MainActivity : FlutterActivity() {
 
     private fun openBatterySettings() {
         try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && powerManager != null && !powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                    return
+                } catch (_: Exception) {}
+            }
+
             val intent = Intent().apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     action = Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS

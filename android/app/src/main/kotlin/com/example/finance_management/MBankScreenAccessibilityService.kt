@@ -281,15 +281,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                         alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
                     }
 
-                    mainHandler.post {
-                        try {
-                            Toast.makeText(
-                                applicationContext,
-                                "ARC Finance: Капибара напомнит через 15 минут записать ${amount.toInt()} сом",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } catch (_: Exception) {}
-                    }
+                    // Scheduled reminder safely without intrusive toast interruption
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to schedule messenger debt reminder: ${e.message}", e)
                 }
@@ -303,22 +295,28 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     }
 
     private fun isTargetBankingApp(pkg: String): Boolean {
-        return pkg.contains("mbank") ||
-                pkg.contains("cbk") ||
-                pkg.contains("optima") ||
-                pkg.contains("demir") ||
-                pkg.contains("bakai") ||
-                pkg.contains("finca") ||
-                pkg.contains("keremet") ||
-                pkg.contains("companion") ||
-                pkg.contains("kompanion") ||
-                pkg.contains("rsk") ||
-                pkg.contains("eldik") ||
-                pkg.contains("faktura") ||
-                pkg.contains("o.dengi") ||
-                pkg.contains("megapay") ||
-                pkg.contains("balance.kg") ||
-                pkg.contains("balance")
+        val lower = pkg.lowercase(Locale.ROOT)
+        return lower.contains("maanavan") ||
+                lower.contains("mb_kyrgyzstan") ||
+                lower.contains("mbank") ||
+                lower.contains("cbk") ||
+                lower.contains("optima") ||
+                lower.contains("demir") ||
+                lower.contains("bakai") ||
+                lower.contains("finca") ||
+                lower.contains("keremet") ||
+                lower.contains("companion") ||
+                lower.contains("kompanion") ||
+                lower.contains("rsk") ||
+                lower.contains("eldik") ||
+                lower.contains("faktura") ||
+                lower.contains("o.dengi") ||
+                lower.contains("dengi") ||
+                lower.contains("megapay") ||
+                lower.contains("doscredo") ||
+                lower.contains("simbank") ||
+                lower.contains("balance.kg") ||
+                lower.contains("balance")
     }
 
     private fun isTargetMarketplaceApp(pkg: String): Boolean {
@@ -337,7 +335,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         depth: Int,
         maxNodes: Int
     ) {
-        if (node == null || result.size >= maxNodes || depth > 8) return
+        if (node == null || node.isPassword || result.size >= maxNodes || depth > 8) return
 
         val text = node.text?.toString()?.trim()
         if (!text.isNullOrEmpty() && text.length > 1) {
@@ -399,46 +397,34 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         // Remaining balance if visible
         val balanceAfter = extractBalanceAfter(fullCombined)
 
-        // Deduplication: prevent multiple accessibility events from the same receipt
-        val cleanAmount = String.format(Locale.US, "%.2f", amount)
-        val signature = "${cleanAmount}_${if (isIncome) "in" else "out"}"
-        val currentTime = System.currentTimeMillis()
-
-        cleanUpOldSignatures(currentTime)
-        val lastSeen = recentSignatures[signature]
-        if (lastSeen != null && (currentTime - lastSeen) < DEDUPLICATION_WINDOW_MS) {
-            return
-        }
-        recentSignatures[signature] = currentTime
-
         Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title, Category: $categoryId")
 
+        val cleanAmount = String.format(Locale.US, "%.2f", amount)
+        val currentTime = System.currentTimeMillis()
         val notificationTitle = if (isIncome) "Зачисление: $title" else "Оплата: $title"
         val notificationBody = "${if (isIncome) "+" else "−"}$cleanAmount сом • Зафиксировано с экрана"
         val rawText = "$notificationTitle: $notificationBody"
 
-        savePendingScreenTransaction(
-            title = notificationTitle,
-            body = notificationBody,
-            rawText = rawText,
+        // Process through unified TransactionDeduplicationManager (15-min TTL sliding window)
+        // This ensures 100% deduplication synchronization across screen captures and pushes
+        val recordedTx = TransactionDeduplicationManager.getInstance(this).onUiTransactionCaptured(
+            packageName = pkg,
             amount = amount,
-            isIncome = isIncome,
-            categoryId = categoryId,
-            balanceAfter = balanceAfter
+            currency = "KGS",
+            targetIdentifier = title,
+            title = notificationTitle,
+            rawText = rawText,
+            timestamp = currentTime
         )
 
-        val broadcastIntent = Intent(ACTION_SCREEN_TX_CAPTURED).apply {
-            putExtra("title", notificationTitle)
-            putExtra("body", notificationBody)
-            putExtra("rawText", rawText)
-            putExtra("amount", amount)
-            putExtra("isIncome", isIncome)
-            putExtra("categoryId", categoryId)
-            putExtra("source", "accessibility_screen")
-            putExtra("timestamp", currentTime)
-            setPackage(packageName)
+        if (recordedTx == null) {
+            Log.d(TAG, "UI transaction ignored by TransactionDeduplicationManager as duplicate within TTL window")
+            return
         }
-        sendBroadcast(broadcastIntent)
+
+        if (balanceAfter != null && balanceAfter > 0) {
+            broadcastScrapedBalance("MBank", balanceAfter, currentTime)
+        }
 
         mainHandler.post {
             try {
@@ -551,8 +537,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 setPadding(0, 0, 0, dpToPx(10))
             }
             val capyAvatar = TextView(this).apply {
-                text = "🦫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 32f)
+                text = "ARC"
+                setTextColor(Color.parseColor("#FF9F0A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                typeface = Typeface.DEFAULT_BOLD
                 setPadding(0, 0, dpToPx(10), 0)
             }
             capyHeader.addView(capyAvatar)
@@ -561,7 +549,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 orientation = LinearLayout.VERTICAL
             }
             val tagText = TextView(this).apply {
-                text = "WINTER ARC • КАПИБАРА-ФИЛЬТР"
+                text = "ФИНАНСОВЫЙ КОНТРОЛЬ"
                 setTextColor(Color.parseColor("#FF9F0A")) // Amber
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                 typeface = Typeface.DEFAULT_BOLD
@@ -748,7 +736,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         Log.i(TAG, "Shadow balance scraped! Bank: $bankName, Balance: $balance SOM")
 
-        // Save to SharedPreferences
+        broadcastScrapedBalance(bankName, balance, now)
+
+        mainHandler.post {
+            try {
+                Toast.makeText(
+                    applicationContext,
+                    "ARC Finance: баланс $bankName (${balance.toInt()} сом) синхронизирован",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun broadcastScrapedBalance(bankName: String, balance: Double, now: Long) {
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val balanceObj = JSONObject().apply {
@@ -772,27 +773,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             setPackage(packageName)
         }
         sendBroadcast(broadcastIntent)
-
-        mainHandler.post {
-            try {
-                Toast.makeText(
-                    applicationContext,
-                    "ARC Finance: баланс $bankName (${balance.toInt()} сом) синхронизирован",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } catch (_: Exception) {}
-        }
     }
 
     private fun getBankDisplayName(pkg: String): String {
+        val lower = pkg.lowercase(Locale.ROOT)
         return when {
-            pkg.contains("mbank") || pkg.contains("cbk") -> "MBank"
-            pkg.contains("optima") -> "Optima"
-            pkg.contains("demir") -> "Demir Bank"
-            pkg.contains("bakai") -> "Bakai Bank"
-            pkg.contains("finca") -> "Finca Bank"
-            pkg.contains("o.dengi") -> "O! Деньги"
-            pkg.contains("megapay") -> "MegaPay"
+            lower.contains("mbank") || lower.contains("cbk") || lower.contains("maanavan") || lower.contains("mb_kyrgyzstan") -> "MBank"
+            lower.contains("optima") -> "Optima"
+            lower.contains("demir") -> "Demir Bank"
+            lower.contains("bakai") -> "Bakai Bank"
+            lower.contains("finca") -> "Finca Bank"
+            lower.contains("o.dengi") || lower.contains("dengi") -> "O! Деньги"
+            lower.contains("megapay") -> "MegaPay"
+            lower.contains("doscredo") || lower.contains("simbank") -> "DosCredo Bank"
+            lower.contains("eldik") || lower.contains("rsk") -> "РСК / Элдик Банк"
             else -> "Банк"
         }
     }
@@ -916,36 +910,69 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun extractAmountFromTexts(texts: List<String>, fullCombined: String): Double? {
-        val amountPattern = Pattern.compile(
-            "([+−\\-]?)\\s*(\\d{1,3}(?:[\\s\\u00A0]\\d{3})*(?:[.,]\\d{1,2})?)\\s*(сом|c|с|kgs|KGS)\\b",
-            Pattern.CASE_INSENSITIVE
-        )
+        // 1. Check full screen combined text with unified BankPatternConfig.AMOUNT_REGEX
+        val unifiedMatcher = BankPatternConfig.AMOUNT_REGEX.matcher(fullCombined)
+        if (unifiedMatcher.find()) {
+            val rawNum = unifiedMatcher.group(1)
+                ?.replace(" ", "")
+                ?.replace("\u00A0", "")
+                ?.replace(",", ".") ?: ""
+            val parsed = rawNum.toDoubleOrNull()
+            if (parsed != null && parsed > 0 && parsed < 10_000_000) {
+                return parsed
+            }
+        }
 
+        // 2. Check each node independently
         for (text in texts) {
-            val matcher = amountPattern.matcher(text)
-            if (matcher.find()) {
-                val rawNumber = matcher.group(2)
+            val m = BankPatternConfig.AMOUNT_REGEX.matcher(text)
+            if (m.find()) {
+                val rawNumber = m.group(1)
                     ?.replace(" ", "")
                     ?.replace("\u00A0", "")
                     ?.replace(",", ".") ?: ""
                 val parsedVal = rawNumber.toDoubleOrNull()
-                if (parsedVal != null && parsedVal > 0) {
+                if (parsedVal != null && parsedVal > 0 && parsedVal < 10_000_000) {
                     return parsedVal
                 }
             }
         }
 
-        // Check adjacent nodes
+        // 3. Proximity check across up to 3 neighboring nodes (for custom Compose/Flutter banking views)
+        val currencyMarkers = listOf("сом", "kgs", "kzt", "rub", "usd", "eur")
         for (i in texts.indices) {
             val item = texts[i]
             val cleaned = item.replace(" ", "").replace("\u00A0", "").replace(",", ".")
             val num = cleaned.toDoubleOrNull()
             if (num != null && num > 0 && num < 10_000_000) {
-                val nextItem = if (i + 1 < texts.size) texts[i + 1].lowercase(Locale.ROOT) else ""
-                val prevItem = if (i - 1 >= 0) texts[i - 1].lowercase(Locale.ROOT) else ""
-                if (nextItem.contains("сом") || nextItem.contains("c") || nextItem.contains("kgs") ||
-                    prevItem.contains("сумма") || prevItem.contains("итог") || prevItem.contains("к оплате")
-                ) {
+                val isYear = num in 2020.0..2030.0
+
+                var hasNearbyCurrency = false
+                for (offset in 1..3) {
+                    if (i + offset < texts.size) {
+                        val ahead = texts[i + offset].lowercase(Locale.ROOT)
+                        if (currencyMarkers.any { ahead.contains(it) } || ahead == "c" || ahead == "с" || ahead.startsWith("c.") || ahead.startsWith("с.")) {
+                            hasNearbyCurrency = true
+                            break
+                        }
+                    }
+                }
+
+                var hasNearbyMarker = false
+                for (offset in 1..3) {
+                    if (i - offset >= 0) {
+                        val behind = texts[i - offset].lowercase(Locale.ROOT)
+                        if (behind.contains("сумма") || behind.contains("итог") || behind.contains("к оплате") ||
+                            behind.contains("перевод") || behind.contains("списано") || behind.contains("оплачено") ||
+                            currencyMarkers.any { behind.contains(it) } || behind == "c" || behind == "с"
+                        ) {
+                            hasNearbyMarker = true
+                            break
+                        }
+                    }
+                }
+
+                if (hasNearbyCurrency || (!isYear && hasNearbyMarker)) {
                     return num
                 }
             }
@@ -1103,11 +1130,11 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     private fun showFloatingBubble() {
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val isEnabled = if (prefs.contains("flutter.arc_floating_capy_enabled")) {
-            prefs.getBoolean("flutter.arc_floating_capy_enabled", true)
+            prefs.getBoolean("flutter.arc_floating_capy_enabled", false)
         } else if (prefs.contains("arc_floating_capy_enabled")) {
-            prefs.getBoolean("arc_floating_capy_enabled", true)
+            prefs.getBoolean("arc_floating_capy_enabled", false)
         } else {
-            true
+            false
         }
         if (!isEnabled) {
             if (floatingBubbleView != null) {
@@ -1161,8 +1188,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
 
             val capyIcon = TextView(this).apply {
-                text = "🦫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                text = "ARC"
+                setTextColor(Color.parseColor("#FF9F0A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
             val capyBadge = TextView(this).apply {
@@ -1633,8 +1662,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 elevation = dpToPx(8).toFloat()
             }
             val capyIcon = TextView(this).apply {
-                text = "🦫"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
+                text = "ARC"
+                setTextColor(Color.parseColor("#FF453A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
             avatarContainer.addView(capyIcon, FrameLayout.LayoutParams(
@@ -1721,7 +1752,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 setPadding(dpToPx(12), dpToPx(10), dpToPx(12), dpToPx(10))
             }
             val goalText = TextView(this).apply {
-                text = "🎯 Главная цель: $dreamGoal\nКапибара заставляет тебя держать дисциплину!"
+                text = "Цель: $dreamGoal\nСохраняйте финансовую дисциплину"
                 setTextColor(Color.parseColor("#FF9F0A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
                 typeface = Typeface.DEFAULT_BOLD

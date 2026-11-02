@@ -323,7 +323,11 @@ class _CapybaraMascotCardState extends State<CapybaraMascotCard>
                         moodImagePath,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => const Center(
-                          child: Text('🦫', style: TextStyle(fontSize: 28)),
+                          child: Icon(
+                            Icons.savings_rounded,
+                            color: AppColors.capybaraAmber,
+                            size: 28,
+                          ),
                         ),
                       ),
                     ),

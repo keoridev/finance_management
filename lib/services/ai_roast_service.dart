@@ -8,9 +8,9 @@ import '../utils/formatters.dart';
 
 class AIRoastResult {
   final String roastText;
-  final String verdict; // 'ТАКСИ-ОЛИГАРХ', 'МАСТЕР ЛАГМАНОВ', 'ХОЛОДНЫЙ КРЕМЕНЬ', 'СЛИВ ДЕНЕГ'
+  final String verdict;
   final Color verdictColor;
-  final int toxicityScore; // 1 to 100
+  final int toxicityScore;
   final bool isFromApi;
   final DateTime date;
 
@@ -31,7 +31,7 @@ class AIRoastService {
   static Future<String?> getApiKey() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.reload(); // Force refresh from disk
+      await prefs.reload();
       final key = prefs.getString('api_key') ??
           prefs.getString('gemini_api_key') ??
           prefs.getString('arc_gemini_api_key') ??
@@ -72,8 +72,6 @@ class AIRoastService {
     } catch (_) {}
   }
 
-  /// Generates weekly roast. Uses Gemini API if API key configured, otherwise
-  /// falls back instantly to the local offline Bishkek Roast Engine.
   static Future<AIRoastResult> generateRoast({
     required List<Transaction> transactions,
     required double totalBalance,
@@ -108,7 +106,6 @@ class AIRoastService {
     );
   }
 
-  /// REST call to Gemini 1.5 Flash using standard dart:io HttpClient
   static Future<AIRoastResult?> _callGeminiApi({
     required String apiKey,
     required List<Transaction> transactions,

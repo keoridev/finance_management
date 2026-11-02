@@ -334,8 +334,8 @@ class ReceiptVisionService {
 
           final rawItems = parsed['items'] as List? ?? [];
           final items = rawItems
-              .where((m) => m is Map)
-              .map((m) => ReceiptItem.fromMap(Map<String, dynamic>.from(m as Map)))
+              .whereType<Map>()
+              .map((m) => ReceiptItem.fromMap(Map<String, dynamic>.from(m)))
               .toList();
           final total = (parsed['total'] as num?)?.toDouble() ??
               items.fold<double>(0.0, (s, i) => s + i.price);

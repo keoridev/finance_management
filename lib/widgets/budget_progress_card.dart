@@ -120,7 +120,9 @@ class BudgetProgressCard extends StatelessWidget {
                   fontWeight: isWarning ? FontWeight.w600 : FontWeight.w400,
                   color: isExceeded
                       ? AppColors.expense
-                      : (isWarning ? AppColors.iosOrange : Colors.white.withValues(alpha: 0.45)),
+                      : (isWarning
+                            ? AppColors.iosOrange
+                            : Colors.white.withValues(alpha: 0.45)),
                 ),
               ),
               Text(
@@ -146,7 +148,9 @@ class BudgetProgressCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.expense.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.expense.withValues(alpha: 0.3)),
+                border: Border.all(
+                  color: AppColors.expense.withValues(alpha: 0.3),
+                ),
               ),
               child: Row(
                 children: [
@@ -176,7 +180,9 @@ class BudgetProgressCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.iosOrange.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.iosOrange.withValues(alpha: 0.25)),
+                border: Border.all(
+                  color: AppColors.iosOrange.withValues(alpha: 0.25),
+                ),
               ),
               child: Row(
                 children: [

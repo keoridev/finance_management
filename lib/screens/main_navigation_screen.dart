@@ -100,6 +100,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       },
       onBankNotificationAction: (notification) {
         if (mounted) {
+          
           _handleIncomingBankNotification(notification);
         }
       },
@@ -405,8 +406,26 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       return;
     }
 
-    final parsed = MBankParserService.parse(fullText);
-    if (parsed == null) return;
+    ParsedMBankNotification? parsed = MBankParserService.parse(fullText);
+    if (parsed == null) {
+      final fallbackAmount = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+      if (fallbackAmount > 0) {
+        final targetId = raw['targetIdentifier'] as String? ?? 'UNKNOWN';
+        final isIncome = fullText.toLowerCase().contains('пополнен') ||
+            fullText.toLowerCase().contains('зачислен') ||
+            fullText.toLowerCase().contains('перевели');
+        parsed = ParsedMBankNotification(
+          amount: fallbackAmount,
+          type: isIncome ? TransactionType.income : TransactionType.expense,
+          title: targetId != 'UNKNOWN' ? targetId : (title.isNotEmpty ? title : 'MBank'),
+          categoryId: isIncome ? 'cat_other_income' : 'cat_other_expense',
+          rawText: fullText,
+          timestamp: DateTime.now(),
+        );
+      } else {
+        return;
+      }
+    }
 
     // Pure balance notification from bank: update account balance safely, NO expense created!
     if (parsed.isBalanceOnly) {
@@ -429,15 +448,33 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       return;
     }
 
+    final status = raw['status'] as String? ?? 'CONFIRMED_PUSH';
     final source = raw['source'] as String? ?? 'notification';
-    final isScreen = source == 'accessibility_screen';
+    final isScreen = source == 'accessibility_screen' || status == 'CONFIRMED_UI';
+
+    if (status == 'VERIFIED_BY_PUSH') {
+      _notificationController.showNotification(
+        AppNotification(
+          id: 'mbank_verified_${DateTime.now().millisecondsSinceEpoch}',
+          type: NotificationType.mbankAutoSync,
+          title: 'Подтверждено пушем: ${parsed.title}',
+          body: '${CurrencyFormatter.format(parsed.amount)} • Сверено с экраном (без дублирования)',
+          actionLabel: 'К операциям',
+          onAction: () {
+            _notificationController.dismissActiveNotification();
+            _switchTab(1);
+          },
+        ),
+      );
+      return;
+    }
 
     widget.controller.addMBankAutoTransaction(
       title: parsed.title,
       amount: parsed.amount,
       type: parsed.type,
       categoryId: parsed.categoryId,
-      note: isScreen ? 'Чек с экрана MBank: $fullText' : 'MBank: $fullText',
+      note: isScreen ? 'Чек с экрана: $fullText' : 'Пуш банка: $fullText',
       balanceAfter: parsed.balanceAfter,
     );
 
@@ -585,8 +622,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
   Future<void> _checkAndImportPendingBankNotifications() async {
     final rawPending = await WidgetLaunchService.getPendingBankNotifications();
-    await WidgetLaunchService.clearPendingBankNotifications();
     if (rawPending.isEmpty || rawPending == '[]') return;
+    await WidgetLaunchService.clearPendingBankNotifications();
 
     try {
       final decoded = jsonDecode(rawPending);
@@ -605,10 +642,33 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
               continue;
             }
 
-            final source = item['source'] as String? ?? 'notification';
-            final isScreen = source == 'accessibility_screen';
+            final status = item['status'] as String? ?? 'CONFIRMED_PUSH';
+            if (status == 'VERIFIED_BY_PUSH') {
+              continue;
+            }
 
-            final parsed = MBankParserService.parse(fullText);
+            final source = item['source'] as String? ?? 'notification';
+            final isScreen = source == 'accessibility_screen' || status == 'CONFIRMED_UI';
+
+            ParsedMBankNotification? parsed = MBankParserService.parse(fullText);
+            if (parsed == null) {
+              final fallbackAmount = (item['amount'] as num?)?.toDouble() ?? 0.0;
+              if (fallbackAmount > 0) {
+                final targetId = item['targetIdentifier'] as String? ?? 'UNKNOWN';
+                final isIncome = fullText.toLowerCase().contains('пополнен') ||
+                    fullText.toLowerCase().contains('зачислен') ||
+                    fullText.toLowerCase().contains('перевели');
+                parsed = ParsedMBankNotification(
+                  amount: fallbackAmount,
+                  type: isIncome ? TransactionType.income : TransactionType.expense,
+                  title: targetId != 'UNKNOWN' ? targetId : (title.isNotEmpty ? title : 'MBank'),
+                  categoryId: isIncome ? 'cat_other_income' : 'cat_other_expense',
+                  rawText: fullText,
+                  timestamp: DateTime.now(),
+                );
+              }
+            }
+
             if (parsed != null) {
               if (parsed.isBalanceOnly) {
                 if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {

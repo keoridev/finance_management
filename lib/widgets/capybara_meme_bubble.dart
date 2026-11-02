@@ -120,7 +120,9 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: AppColors.capybaraAmber.withValues(alpha: 0.38),
+                            color: AppColors.capybaraAmber.withValues(
+                              alpha: 0.38,
+                            ),
                             blurRadius: 12,
                             offset: const Offset(0, 2),
                           ),
@@ -131,7 +133,11 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                           moodImage,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => const Center(
-                            child: Text('🦫', style: TextStyle(fontSize: 24)),
+                            child: Icon(
+                              Icons.savings_rounded,
+                              color: AppColors.capybaraAmber,
+                              size: 24,
+                            ),
                           ),
                         ),
                       ),
@@ -169,7 +175,6 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                           ),
                           const SizedBox(width: 6),
 
-                          // "ЕЩЕ МЕМ" Shuffle Button
                           InkWell(
                             onTap: _nextMeme,
                             borderRadius: BorderRadius.circular(7),
@@ -179,10 +184,14 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                                 vertical: 3,
                               ),
                               decoration: BoxDecoration(
-                                color: AppColors.capybaraAmber.withValues(alpha: 0.16),
+                                color: AppColors.capybaraAmber.withValues(
+                                  alpha: 0.16,
+                                ),
                                 borderRadius: BorderRadius.circular(7),
                                 border: Border.all(
-                                  color: AppColors.capybaraAmber.withValues(alpha: 0.3),
+                                  color: AppColors.capybaraAmber.withValues(
+                                    alpha: 0.3,
+                                  ),
                                   width: 0.8,
                                 ),
                               ),
@@ -210,7 +219,6 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                           ),
                           const SizedBox(width: 4),
 
-                          // "ВСЕ" Oracle Sheet Button
                           InkWell(
                             onTap: _openMemeOracleSheet,
                             borderRadius: BorderRadius.circular(7),
@@ -231,7 +239,6 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                       ),
                       const SizedBox(height: 6),
 
-                      // Animated Meme Body Punchline
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 240),
                         transitionBuilder: (child, anim) => FadeTransition(
@@ -257,7 +264,6 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
                       ),
                       const SizedBox(height: 7),
 
-                      // Tag and Prompt Hint
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -307,7 +313,6 @@ class _CapybaraMemeBubbleState extends State<CapybaraMemeBubble>
   }
 }
 
-/// Full-screen Bottom Sheet Oracle with all 30+ Bishkek & Financial Memes
 class _CapybaraMemeOracleSheet extends StatefulWidget {
   final FinanceController controller;
 
@@ -334,7 +339,9 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
   @override
   void initState() {
     super.initState();
-    final rawPool = NotificationController.getAllInsightsPool(widget.controller);
+    final rawPool = NotificationController.getAllInsightsPool(
+      widget.controller,
+    );
     final List<CapybaraInsight> uniqueMemes = [];
     final Set<String> seen = {};
     for (final m in rawPool) {
@@ -395,7 +402,6 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
       child: Column(
         children: [
           const SizedBox(height: 12),
-          // Drag handle
           Container(
             width: 38,
             height: 4,
@@ -406,7 +412,7 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
           ),
           const SizedBox(height: 14),
 
-          // Header
+          
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -416,7 +422,10 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
                   height: 36,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.capybaraAmber, width: 1.5),
+                    border: Border.all(
+                      color: AppColors.capybaraAmber,
+                      width: 1.5,
+                    ),
                   ),
                   child: ClipOval(
                     child: Image.asset(
@@ -452,14 +461,17 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
                 ),
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 22),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white70,
+                    size: 22,
+                  ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 12),
 
-          // Category filter pills
           SizedBox(
             height: 34,
             child: ListView.separated(
@@ -478,7 +490,9 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
                   labelStyle: TextStyle(
                     fontSize: 11.5,
                     fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                    color: isSelected ? const Color(0xFF161412) : Colors.white70,
+                    color: isSelected
+                        ? const Color(0xFF161412)
+                        : Colors.white70,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -498,7 +512,6 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
           ),
           const SizedBox(height: 12),
 
-          // Memes List
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -545,7 +558,9 @@ class _CapybaraMemeOracleSheetState extends State<_CapybaraMemeOracleSheet> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: AppColors.capybaraAmber.withValues(alpha: 0.15),
+                              color: AppColors.capybaraAmber.withValues(
+                                alpha: 0.15,
+                              ),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(

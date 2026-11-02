@@ -2,21 +2,15 @@ package com.example.finance_management
 
 import android.app.Notification
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import org.json.JSONArray
-import org.json.JSONObject
-
 import java.util.regex.Pattern
 
 class MBankNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "MBankListener"
-        const val PREFS_KEY_PENDING_NOTIFICATIONS = "arc_pending_bank_notifications"
         const val ACTION_BANK_NOTIFICATION_RECEIVED = "com.example.finance_management.BANK_NOTIFICATION_RECEIVED"
 
         @Volatile
@@ -55,72 +49,69 @@ class MBankNotificationListenerService : NotificationListenerService() {
             val notification = sbn.notification ?: return
             val extras = notification.extras ?: return
 
-            val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
-            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-            val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+            val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+            val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+            val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim() ?: ""
+            val ticker = notification.tickerText?.toString()?.trim() ?: ""
 
-            val combined = "$title $text $bigText".trim()
+            val combined = "$title $text $bigText $subText $infoText $ticker".trim()
             if (combined.isEmpty()) return
 
-            // 1. Bank & NFC Wallet packages
-            val isBankOrWalletPackage = pkg.contains("mbank") || pkg.contains("cbk") ||
-                    pkg.contains("optima") || pkg.contains("bakai") ||
-                    pkg.contains("demir") || pkg.contains("finca") ||
-                    pkg.contains("rsk") || pkg.contains("kompanion") ||
-                    pkg.contains("walletnfcrel") || pkg.contains("wallet") ||
-                    pkg.contains("gms") || pkg.contains("pay")
-
-            // 2. SMS packages
-            val isSmsPackage = pkg.contains("messaging") || pkg.contains("mms") ||
-                    pkg.contains("sms") || pkg.contains("message")
-
-            // 3. Keyword checks
-            val containsBankOrWalletKeyword = combined.contains("mbank", ignoreCase = true) ||
-                    combined.contains("optima", ignoreCase = true) ||
-                    combined.contains("bakai", ignoreCase = true) ||
-                    combined.contains("demir", ignoreCase = true) ||
-                    combined.contains("finca", ignoreCase = true) ||
-                    combined.contains("rsk", ignoreCase = true) ||
-                    combined.contains("kompanion", ignoreCase = true) ||
-                    combined.contains("google pay", ignoreCase = true) ||
-                    combined.contains("google wallet", ignoreCase = true) ||
-                    combined.contains("gpay", ignoreCase = true)
-
-            val hasCurrency = combined.contains("сом", ignoreCase = true) ||
-                    combined.contains("KGS", ignoreCase = true) ||
-                    combined.contains("kgs", ignoreCase = true) ||
-                    combined.contains("som", ignoreCase = true) ||
-                    Pattern.compile("\\d+\\s*(?:с\\.|c\\.|[cс]\\b)", Pattern.CASE_INSENSITIVE).matcher(combined).find()
-
-            val hasTransactionAction = combined.contains("пополнен", ignoreCase = true) ||
-                    combined.contains("зачислен", ignoreCase = true) ||
-                    combined.contains("списан", ignoreCase = true) ||
-                    combined.contains("оплат", ignoreCase = true) ||
-                    combined.contains("зарплат", ignoreCase = true) ||
-                    combined.contains("перевод", ignoreCase = true) ||
-                    combined.contains("покупк", ignoreCase = true) ||
-                    combined.contains("сняти", ignoreCase = true) ||
-                    combined.contains("чек", ignoreCase = true) ||
-                    combined.contains("platezh", ignoreCase = true) ||
-                    combined.contains("popolnen", ignoreCase = true) ||
-                    combined.contains("spisanie", ignoreCase = true) ||
-                    combined.contains("oplata", ignoreCase = true) ||
-                    combined.contains("paid", ignoreCase = true) ||
-                    combined.contains("spent", ignoreCase = true) ||
-                    combined.contains("purchase", ignoreCase = true)
-
-            val shouldCapture = when {
-                isBankOrWalletPackage && (hasCurrency || hasTransactionAction || containsBankOrWalletKeyword) -> true
-                isSmsPackage && (containsBankOrWalletKeyword || (hasCurrency && hasTransactionAction)) -> true
-                hasCurrency && hasTransactionAction -> true
-                else -> false
-            }
-
-            if (!shouldCapture) {
+            // 1. Whitelist package check (Section 3.2)
+            val isWhitelisted = BankPatternConfig.isWhitelistedPackage(pkg)
+            val isSms = pkg.contains("messaging") || pkg.contains("mms") || pkg.contains("sms")
+            if (!isWhitelisted && !isSms) {
                 return
             }
 
-            Log.d(TAG, "Captured bank transaction notification from [$pkg]: $title -> $text | $bigText")
+            // 2. Stop-words filter (Section 3.2: Skip promo, login alerts, terms updates)
+            if (BankPatternConfig.isStopWordPush(combined)) {
+                Log.d(TAG, "Notification skipped by stop-word filter: $combined")
+                return
+            }
+
+            // 3. Check for expense markers or currency
+            val hasExpenseMarker = BankPatternConfig.PUSH_EXPENSE_MARKERS.any { combined.contains(it, ignoreCase = true) }
+            val hasCurrency = combined.contains("сом", ignoreCase = true) ||
+                    combined.contains("KGS", ignoreCase = true) ||
+                    combined.contains("som", ignoreCase = true) ||
+                    Pattern.compile("\\d+\\s*(?:с\\.|c\\.|[cс]\\b)", Pattern.CASE_INSENSITIVE).matcher(combined).find()
+
+            if (!hasExpenseMarker && !hasCurrency) {
+                return
+            }
+
+            // 4. Parse Amount via Section 3.1 regex
+            val amountMatcher = BankPatternConfig.AMOUNT_REGEX.matcher(combined)
+            val (amount, currency) = if (amountMatcher.find()) {
+                val rawNum = amountMatcher.group(1)?.replace(" ", "")?.replace("\u00A0", "")?.replace(",", ".") ?: "0"
+                val parsedAmt = rawNum.toDoubleOrNull() ?: 0.0
+                val rawCurr = amountMatcher.group(2)?.uppercase() ?: "KGS"
+                val normCurr = when {
+                    rawCurr.contains("СОМ") || rawCurr.contains("KGS") || rawCurr.contains("SOM") ||
+                            rawCurr == "C" || rawCurr == "С" || rawCurr.startsWith("C.") || rawCurr.startsWith("С.") -> "KGS"
+                    rawCurr.contains("РУБ") || rawCurr.contains("RUB") -> "RUB"
+                    rawCurr.contains("USD") || rawCurr.contains("$") -> "USD"
+                    rawCurr.contains("EUR") -> "EUR"
+                    rawCurr.contains("KZT") || rawCurr.contains("ТЕНГЕ") -> "KZT"
+                    else -> "KGS"
+                }
+                Pair(parsedAmt, normCurr)
+            } else {
+                Pair(0.0, "KGS")
+            }
+
+            // 5. Extract Recipient / Target Identifier (Section 3.3)
+            var targetIdentifier = "UNKNOWN"
+            for (p in BankPatternConfig.RECIPIENT_PATTERNS) {
+                val m = p.matcher(combined)
+                if (m.find()) {
+                    targetIdentifier = m.group(1)?.trim() ?: "UNKNOWN"
+                    break
+                }
+            }
 
             val bestBody = when {
                 bigText.isNotEmpty() && !bigText.equals(text, ignoreCase = true) -> {
@@ -129,61 +120,35 @@ class MBankNotificationListenerService : NotificationListenerService() {
                 text.isNotEmpty() -> text
                 else -> bigText
             }
-            savePendingNotification(title, bestBody, sbn.postTime)
 
-            // Broadcast to MainActivity if active
-            val broadcastIntent = Intent(ACTION_BANK_NOTIFICATION_RECEIVED).apply {
-                putExtra("title", title)
-                putExtra("body", bestBody)
-                putExtra("timestamp", sbn.postTime)
-                setPackage(packageName)
+            val finalBody = if (subText.isNotEmpty() && !bestBody.contains(subText, ignoreCase = true)) {
+                "$bestBody ($subText)"
+            } else {
+                bestBody
             }
-            sendBroadcast(broadcastIntent)
+
+            val bankTitle = when {
+                title == "1444" || title.contains("mbank", ignoreCase = true) || pkg.contains("maanavan") || pkg.contains("mb_kyrgyzstan") || pkg.contains("mbank") -> "MBank"
+                title == "2424" || title.contains("optima", ignoreCase = true) || pkg.contains("optima") -> "Optima"
+                title == "2929" || title.contains("bakai", ignoreCase = true) || pkg.contains("bakai") -> "Bakai Bank"
+                title.isNotEmpty() && !title.equals("SMS", ignoreCase = true) -> title
+                else -> "Банк"
+            }
+
+            // 6. Forward to TransactionDeduplicationManager with 15-minute sliding TTL window (Section 3.3)
+            if (amount > 0.0) {
+                TransactionDeduplicationManager.getInstance(this).onPushNotificationCaptured(
+                    packageName = pkg,
+                    amount = amount,
+                    currency = currency,
+                    targetIdentifier = targetIdentifier,
+                    title = bankTitle,
+                    body = finalBody,
+                    timestamp = sbn.postTime
+                )
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling notification: ${e.message}", e)
-        }
-    }
-
-    private fun savePendingNotification(title: String, body: String, timestamp: Long) {
-        try {
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val existingJson = prefs.getString("flutter.$PREFS_KEY_PENDING_NOTIFICATIONS", null)
-                ?: prefs.getString(PREFS_KEY_PENDING_NOTIFICATIONS, null)
-                ?: "[]"
-
-            val jsonArray = JSONArray(existingJson)
-            // Prevent storing identical notification within 5 minutes
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.optJSONObject(i)
-                if (obj != null) {
-                    val prevRaw = obj.optString("rawText", "")
-                    val prevTime = obj.optLong("timestamp", 0)
-                    if ((prevRaw == "$title: $body" || prevRaw.contains(body) || body.contains(prevRaw)) && Math.abs(timestamp - prevTime) < 300_000L) {
-                        return // Duplicate within 5 minutes, ignore
-                    }
-                }
-            }
-
-            val newObj = JSONObject().apply {
-                put("title", title)
-                put("body", body)
-                put("timestamp", timestamp)
-                put("rawText", "$title: $body")
-            }
-            jsonArray.put(newObj)
-
-            while (jsonArray.length() > 30) {
-                jsonArray.remove(0)
-            }
-
-            prefs.edit()
-                .putString("flutter.$PREFS_KEY_PENDING_NOTIFICATIONS", jsonArray.toString())
-                .putString(PREFS_KEY_PENDING_NOTIFICATIONS, jsonArray.toString())
-                .apply()
-
-            Log.d(TAG, "Saved pending notification. Total count: ${jsonArray.length()}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error saving notification to prefs: ${e.message}", e)
         }
     }
 }
