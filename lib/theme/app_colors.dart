@@ -47,15 +47,16 @@ class AppColors {
   static const Color expense = iosRed;
   static const Color warning = capybaraGold;
 
-  // Category Colors (Refined Apple System Palette)
-  static const Color catGroceries = Color(0xFF30D158);
-  static const Color catTransport = Color(0xFF0A84FF);
-  static const Color catHousing = Color(0xFF5E5CE6);
-  static const Color catRestaurants = Color(0xFFFF9F0A);
-  static const Color catHealth = Color(0xFFFF453A);
-  static const Color catShopping = Color(0xFFBF5AF2);
-  static const Color catEntertainment = Color(0xFFFF375F);
-  static const Color catSalary = Color(0xFF30D158);
-  static const Color catFreelance = Color(0xFF64D2FF);
+  // Restrained Minimalist Duotone Design System (Deep Black & Warm Capybara Amber)
+  // Two unified colors: Obsidian/Graphite base + Signature Warm Amber accent
+  static const Color catGroceries = capybaraAmber;
+  static const Color catTransport = capybaraAmber;
+  static const Color catHousing = capybaraAmber;
+  static const Color catRestaurants = capybaraAmber;
+  static const Color catHealth = capybaraAmber;
+  static const Color catShopping = capybaraAmber;
+  static const Color catEntertainment = capybaraAmber;
+  static const Color catSalary = capybaraAmber;
+  static const Color catFreelance = capybaraAmber;
   static const Color catOther = Color(0xFF8E8E93);
 }

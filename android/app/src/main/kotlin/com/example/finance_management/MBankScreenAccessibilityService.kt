@@ -87,6 +87,18 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     private var socialBlockerOverlayView: View? = null
     private var lastSocialBlockTimestamp = 0L
 
+    data class PendingTransferIntent(
+        val amount: Double,
+        val currency: String,
+        val target: String,
+        val timestamp: Long,
+        val rawText: String,
+        val packageName: String
+    )
+
+    private var activePendingTransfer: PendingTransferIntent? = null
+    private var pendingTransferConfirmRunnable: Runnable? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         isServiceRunning = true
@@ -152,26 +164,45 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 mainHandler.post { hideFloatingBubble() }
             }
 
+            // Fast intercept for user click on transfer action buttons ("Перевести", "Оплатить", "Подтвердить")
+            if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                handleViewClicked(event, packageNameStr)
+                return
+            }
+
             // Rate-limit processing to avoid excessive CPU usage during UI transitions
             val now = System.currentTimeMillis()
-            if (now - lastProcessTimestamp < 250) {
+            if (now - lastProcessTimestamp < 200) {
                 return
             }
             lastProcessTimestamp = now
 
-            // Extract visible text hierarchy (optimized to 60 nodes for fast IPC traversal)
+            // Extract visible text hierarchy (optimized to 250 nodes for deep Compose/hybrid layouts)
             val rootNode = rootInActiveWindow ?: event.source ?: return
             val texts = mutableListOf<String>()
-            extractVisibleTexts(rootNode, texts, 0, 60)
+            extractVisibleTexts(rootNode, texts, 0, 250)
 
             if (texts.isEmpty()) return
 
             val fullCombined = texts.joinToString(" ").lowercase(Locale.ROOT)
 
+            // Check 0: Banking error screen cancels pending transfer intent
+            if (BankPatternConfig.isErrorScreen(fullCombined)) {
+                if (activePendingTransfer != null) {
+                    Log.w(TAG, "Bank screen displayed error, cancelling pending transfer: $fullCombined")
+                    pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
+                    activePendingTransfer = null
+                }
+                return
+            }
+
             // Check 1: Post-transaction receipt screen
             val isReceipt = isReceiptScreenText(fullCombined)
             if (isReceipt) {
-                analyzeReceiptScreen(texts, packageNameStr, fullCombined)
+                pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
+                val pending = activePendingTransfer
+                activePendingTransfer = null
+                analyzeReceiptScreen(texts, packageNameStr, fullCombined, pending)
                 return
             }
 
@@ -295,28 +326,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     }
 
     private fun isTargetBankingApp(pkg: String): Boolean {
-        val lower = pkg.lowercase(Locale.ROOT)
-        return lower.contains("maanavan") ||
-                lower.contains("mb_kyrgyzstan") ||
-                lower.contains("mbank") ||
-                lower.contains("cbk") ||
-                lower.contains("optima") ||
-                lower.contains("demir") ||
-                lower.contains("bakai") ||
-                lower.contains("finca") ||
-                lower.contains("keremet") ||
-                lower.contains("companion") ||
-                lower.contains("kompanion") ||
-                lower.contains("rsk") ||
-                lower.contains("eldik") ||
-                lower.contains("faktura") ||
-                lower.contains("o.dengi") ||
-                lower.contains("dengi") ||
-                lower.contains("megapay") ||
-                lower.contains("doscredo") ||
-                lower.contains("simbank") ||
-                lower.contains("balance.kg") ||
-                lower.contains("balance")
+        return BankPatternConfig.isWhitelistedPackage(pkg)
     }
 
     private fun isTargetMarketplaceApp(pkg: String): Boolean {
@@ -335,7 +345,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         depth: Int,
         maxNodes: Int
     ) {
-        if (node == null || node.isPassword || result.size >= maxNodes || depth > 8) return
+        if (node == null || node.isPassword || result.size >= maxNodes || depth > 28) return
 
         val text = node.text?.toString()?.trim()
         if (!text.isNullOrEmpty() && text.length > 1) {
@@ -356,9 +366,6 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             if (child != null) {
                 extractVisibleTexts(child, result, depth + 1, maxNodes)
-                try {
-                    child.recycle()
-                } catch (_: Exception) {}
             }
         }
     }
@@ -368,10 +375,17 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun isReceiptScreenText(fullCombined: String): Boolean {
-        return fullCombined.contains("успешно") ||
+        return BankPatternConfig.isSuccessScreen(fullCombined) ||
+                fullCombined.contains("успешно") ||
                 fullCombined.contains("перевод выполнен") ||
+                fullCombined.contains("перевод отправлен") ||
+                fullCombined.contains("деньги отправлены") ||
+                fullCombined.contains("переведено") ||
+                fullCombined.contains("перевод успешен") ||
+                fullCombined.contains("перевод совершен") ||
                 fullCombined.contains("платеж выполнен") ||
                 fullCombined.contains("платеж проведен") ||
+                fullCombined.contains("платеж совершен") ||
                 fullCombined.contains("оплата проведена") ||
                 fullCombined.contains("оплата прошла") ||
                 fullCombined.contains("чек") ||
@@ -379,34 +393,113 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 fullCombined.contains("детали платежа") ||
                 fullCombined.contains("детали операции") ||
                 fullCombined.contains("детали перевода") ||
+                fullCombined.contains("исполнен") ||
+                fullCombined.contains("в обработке") ||
+                fullCombined.contains("принят в обработку") ||
                 fullCombined.contains("зачислено") ||
-                fullCombined.contains("списано")
+                fullCombined.contains("списано") ||
+                fullCombined.contains("поделиться чеком") ||
+                fullCombined.contains("сохранить чек") ||
+                (fullCombined.contains("готово") && (fullCombined.contains("перевод") || fullCombined.contains("оплата") || fullCombined.contains("сом")))
     }
 
-    private fun analyzeReceiptScreen(texts: List<String>, pkg: String, fullCombined: String) {
-        val amount = extractAmountFromTexts(texts, fullCombined) ?: return
+    private fun handleViewClicked(event: AccessibilityEvent, pkg: String) {
+        try {
+            val clickedText = (event.text?.joinToString(" ") ?: event.contentDescription?.toString() ?: "").lowercase(Locale.ROOT)
+            val isTransferAction = BankPatternConfig.TRANSFER_ACTION_BUTTONS.any { clickedText.contains(it) }
+            if (!isTransferAction) return
+
+            val rootNode = rootInActiveWindow ?: event.source ?: return
+            val texts = mutableListOf<String>()
+            extractVisibleTexts(rootNode, texts, 0, 250)
+            if (texts.isEmpty()) return
+
+            val fullCombined = texts.joinToString(" ").lowercase(Locale.ROOT)
+            val amount = extractAmountFromTexts(texts, fullCombined) ?: return
+            if (amount <= 0.0) return
+
+            val merchantInfo = extractMerchantAndCategory(texts, fullCombined, false)
+            val target = merchantInfo.first
+
+            Log.i(TAG, "Transfer click detected ($clickedText). Staging transfer: $amount SOM to $target")
+
+            pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
+            activePendingTransfer = PendingTransferIntent(
+                amount = amount,
+                currency = "KGS",
+                target = target,
+                timestamp = System.currentTimeMillis(),
+                rawText = fullCombined,
+                packageName = pkg
+            )
+
+            // When MBank freezes/lags on spinner or finishes without an explicit receipt screen,
+            // auto-commit after 5.5 seconds if no error was displayed
+            pendingTransferConfirmRunnable = Runnable {
+                val pending = activePendingTransfer ?: return@Runnable
+                activePendingTransfer = null
+                Log.i(TAG, "Auto-committing transfer after MBank lag timeout: ${pending.amount} SOM to ${pending.target}")
+                commitTransfer(
+                    amount = pending.amount,
+                    title = pending.target,
+                    pkg = pending.packageName,
+                    fullCombined = pending.rawText,
+                    isIncome = false,
+                    isLagFallback = true
+                )
+            }
+            mainHandler.postDelayed(pendingTransferConfirmRunnable!!, 5500L)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in handleViewClicked: ${e.message}", e)
+        }
+    }
+
+    private fun analyzeReceiptScreen(
+        texts: List<String>,
+        pkg: String,
+        fullCombined: String,
+        pending: PendingTransferIntent? = null
+    ) {
+        var amount = extractAmountFromTexts(texts, fullCombined)
+        if (amount == null || amount <= 0.0) {
+            amount = pending?.amount
+        }
+        if (amount == null || amount <= 0.0) return
+
         val isIncome = fullCombined.contains("зачислен") ||
                 fullCombined.contains("пополнен") ||
                 fullCombined.contains("вам перевели") ||
                 fullCombined.contains("зарплат")
 
         val merchantInfo = extractMerchantAndCategory(texts, fullCombined, isIncome)
-        val title = merchantInfo.first
-        val categoryId = merchantInfo.second
+        var title = merchantInfo.first
+        if ((title == "Платеж MBank" || title == "MBank" || title.isEmpty()) && pending != null && pending.target.isNotEmpty() && pending.target != "MBank") {
+            title = pending.target
+        }
 
         // Remaining balance if visible
         val balanceAfter = extractBalanceAfter(fullCombined)
 
-        Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title, Category: $categoryId")
+        Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title")
+        commitTransfer(amount, title, pkg, fullCombined, isIncome, balanceAfter)
+    }
 
+    private fun commitTransfer(
+        amount: Double,
+        title: String,
+        pkg: String,
+        fullCombined: String,
+        isIncome: Boolean,
+        balanceAfter: Double? = null,
+        isLagFallback: Boolean = false
+    ) {
         val cleanAmount = String.format(Locale.US, "%.2f", amount)
         val currentTime = System.currentTimeMillis()
         val notificationTitle = if (isIncome) "Зачисление: $title" else "Оплата: $title"
-        val notificationBody = "${if (isIncome) "+" else "−"}$cleanAmount сом • Зафиксировано с экрана"
+        val suffix = if (isLagFallback) "Зафиксировано при подтверждении" else "Зафиксировано с экрана"
+        val notificationBody = "${if (isIncome) "+" else "−"}$cleanAmount сом • $suffix"
         val rawText = "$notificationTitle: $notificationBody"
 
-        // Process through unified TransactionDeduplicationManager (15-min TTL sliding window)
-        // This ensures 100% deduplication synchronization across screen captures and pushes
         val recordedTx = TransactionDeduplicationManager.getInstance(this).onUiTransactionCaptured(
             packageName = pkg,
             amount = amount,
@@ -430,7 +523,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             try {
                 Toast.makeText(
                     applicationContext,
-                    "ARC Finance: чек на $cleanAmount сом зафиксирован ($title)",
+                    "ARC Finance: ${if (isIncome) "+" else "−"}$cleanAmount сом ($title)",
                     Toast.LENGTH_SHORT
                 ).show()
             } catch (_: Exception) {}
@@ -807,16 +900,38 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             return Pair("Пополнение счета", "cat_other_income")
         }
 
-        // 1. Check for explicit neighbor nodes: "Получатель", "Кому", "Магазин"
+        // 1. Recipient extraction via regular expressions
+        for (pattern in BankPatternConfig.RECIPIENT_PATTERNS) {
+            val matcher = pattern.matcher(fullCombined)
+            if (matcher.find()) {
+                val candidate = matcher.group(1)?.trim() ?: ""
+                if (candidate.length > 2 && !candidate.contains("сом", ignoreCase = true) && !candidate.contains("успешно", ignoreCase = true)) {
+                    val cat = mapMerchantToCategory(candidate.lowercase(Locale.ROOT))
+                    return Pair(candidate, cat)
+                }
+            }
+        }
+
+        // 2. Check for explicit neighbor nodes with or without colons: "Получатель", "Кому", "Клиент"
         for (i in texts.indices) {
-            val lower = texts[i].lowercase(Locale.ROOT)
-            if (lower == "получатель" || lower == "кому" || lower == "магазин" || lower == "торговая точка" || lower == "назначение") {
+            val lower = texts[i].lowercase(Locale.ROOT).trimEnd(':', ' ', '-')
+            if (lower == "получатель" || lower == "кому" || lower == "клиент" || lower == "магазин" ||
+                lower == "торговая точка" || lower == "назначение" || lower == "перевод клиенту" ||
+                lower == "перевод на карту" || lower == "фио"
+            ) {
                 if (i + 1 < texts.size && texts[i + 1].length > 1) {
-                    val rawName = texts[i + 1]
+                    val rawName = texts[i + 1].trim()
                     val cat = mapMerchantToCategory(rawName.lowercase(Locale.ROOT))
                     return Pair(rawName, cat)
                 }
             }
+        }
+
+        // 3. Check for phone or card in text
+        val phoneRegex = Regex("""(\+?996\s*[\d\s-]{9,13})""")
+        val phoneMatch = phoneRegex.find(fullCombined)?.value
+        if (phoneMatch != null) {
+            return Pair("Перевод: $phoneMatch", "cat_transfers")
         }
 
         // 2. Scan text for known Kyrgyz vendors
@@ -910,41 +1025,43 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun extractAmountFromTexts(texts: List<String>, fullCombined: String): Double? {
+        val candidates = mutableListOf<Double>()
+
         // 1. Check full screen combined text with unified BankPatternConfig.AMOUNT_REGEX
         val unifiedMatcher = BankPatternConfig.AMOUNT_REGEX.matcher(fullCombined)
-        if (unifiedMatcher.find()) {
+        while (unifiedMatcher.find()) {
             val rawNum = unifiedMatcher.group(1)
                 ?.replace(" ", "")
                 ?.replace("\u00A0", "")
                 ?.replace(",", ".") ?: ""
             val parsed = rawNum.toDoubleOrNull()
-            if (parsed != null && parsed > 0 && parsed < 10_000_000) {
-                return parsed
+            if (parsed != null && parsed > 0.0 && parsed < 10_000_000.0) {
+                candidates.add(parsed)
             }
         }
 
         // 2. Check each node independently
         for (text in texts) {
             val m = BankPatternConfig.AMOUNT_REGEX.matcher(text)
-            if (m.find()) {
+            while (m.find()) {
                 val rawNumber = m.group(1)
                     ?.replace(" ", "")
                     ?.replace("\u00A0", "")
                     ?.replace(",", ".") ?: ""
                 val parsedVal = rawNumber.toDoubleOrNull()
-                if (parsedVal != null && parsedVal > 0 && parsedVal < 10_000_000) {
-                    return parsedVal
+                if (parsedVal != null && parsedVal > 0.0 && parsedVal < 10_000_000.0) {
+                    candidates.add(parsedVal)
                 }
             }
         }
 
         // 3. Proximity check across up to 3 neighboring nodes (for custom Compose/Flutter banking views)
-        val currencyMarkers = listOf("сом", "kgs", "kzt", "rub", "usd", "eur")
+        val currencyMarkers = listOf("сом", "kgs", "kzt", "rub", "usd", "eur", "c", "с")
         for (i in texts.indices) {
             val item = texts[i]
             val cleaned = item.replace(" ", "").replace("\u00A0", "").replace(",", ".")
             val num = cleaned.toDoubleOrNull()
-            if (num != null && num > 0 && num < 10_000_000) {
+            if (num != null && num > 0.0 && num < 10_000_000.0) {
                 val isYear = num in 2020.0..2030.0
 
                 var hasNearbyCurrency = false
@@ -964,7 +1081,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                         val behind = texts[i - offset].lowercase(Locale.ROOT)
                         if (behind.contains("сумма") || behind.contains("итог") || behind.contains("к оплате") ||
                             behind.contains("перевод") || behind.contains("списано") || behind.contains("оплачено") ||
-                            currencyMarkers.any { behind.contains(it) } || behind == "c" || behind == "с"
+                            behind.contains("отправлено") || behind.contains("переведено")
                         ) {
                             hasNearbyMarker = true
                             break
@@ -973,12 +1090,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 }
 
                 if (hasNearbyCurrency || (!isYear && hasNearbyMarker)) {
-                    return num
+                    candidates.add(num)
                 }
             }
         }
 
-        return null
+        if (candidates.isEmpty()) return null
+
+        // Filter out nominal amounts like 0.0 or 1.0 (often commission/fee) if a main transfer amount exists
+        val significant = candidates.filter { it > 1.0 }
+        return if (significant.isNotEmpty()) {
+            significant.maxOrNull()
+        } else {
+            candidates.firstOrNull()
+        }
     }
 
     private fun extractBalanceAfter(fullCombined: String): Double? {
@@ -1878,6 +2003,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         Log.i(TAG, "MBankScreenAccessibilityService destroyed")
+        pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
+        activePendingTransfer = null
         isServiceRunning = false
         instance = null
         dismissCapybaraOverlay()

@@ -12,7 +12,6 @@ import '../widgets/empty_state_view.dart';
 import '../widgets/glass_skeleton.dart';
 import '../widgets/transaction_success_overlay.dart';
 import '../widgets/transaction_tile.dart';
-import '../widgets/capybara_mascot_card.dart';
 import '../widgets/quick_shortcuts_section.dart';
 import 'killer_features_screen.dart';
 import 'mbank_sync_screen.dart';
@@ -238,17 +237,13 @@ class DashboardScreen extends StatelessWidget {
                   ? '${controller.activeAccountLabel} • ${controller.selectedPeriod.label}'
                   : controller.selectedPeriod.label,
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
 
-            // 2. Интерактивный Маскот Капибара
-            CapybaraMascotCard(controller: controller),
-            const SizedBox(height: 18),
-
-            // 3. Быстрые платежи в 1 тап (Маршрутка, Кофе, Обед...)
+            // 2. Быстрые платежи в 1 тап (Маршрутка, Кофе, Обед...)
             QuickShortcutsSection(controller: controller),
             const SizedBox(height: 18),
 
-            // 4. Счета и Банки
+            // 3. Счета и Банки
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

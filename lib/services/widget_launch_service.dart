@@ -19,6 +19,20 @@ class WidgetLaunchService {
   static BankBalanceScrapedCallback? onBankBalanceScraped;
   static QuickShortcutCallback? onQuickShortcut;
 
+  static String? _cachedInitialAction;
+
+  /// Check and cache if there is an initial widget action before navigation
+  static Future<bool> hasPendingWidgetAction() async {
+    try {
+      final action = await _channel.invokeMethod<String>('getInitialQuickAction');
+      if (action != null && action.isNotEmpty) {
+        _cachedInitialAction = action;
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   /// Initialize channel listener for home screen widget clicks and bank notifications
   static Future<void> initialize({
     required QuickActionCallback onAddTransaction,
@@ -64,6 +78,12 @@ class WidgetLaunchService {
   }
 
   static Future<void> _checkInitialAction() async {
+    if (_cachedInitialAction != null) {
+      final action = _cachedInitialAction;
+      _cachedInitialAction = null;
+      _dispatchAction(action);
+      return;
+    }
     try {
       final initialAction = await _channel.invokeMethod<String>('getInitialQuickAction');
       if (initialAction != null) {

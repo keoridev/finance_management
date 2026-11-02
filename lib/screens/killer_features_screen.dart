@@ -6,6 +6,7 @@ import '../services/geoshame_service.dart';
 import '../services/widget_launch_service.dart';
 import '../state/finance_controller.dart';
 import '../state/notification_controller.dart';
+import '../theme/app_colors.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/workout_penalty_modal.dart';
 import 'ai_roast_screen.dart';
@@ -86,11 +87,11 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Появляется поверх MBank и Оптимы. Тапнул по капибаре — открывается мини-шторка ARC FINANCE для моментальной записи без переключения приложений.',
             badge: (_floatingCapyEnabled && _canDrawOverlays) ? 'АКТИВНА' : (_canDrawOverlays ? 'ОТКЛ' : 'ТРЕБУЕТ ДОСТУП'),
-            badgeColor: (_floatingCapyEnabled && _canDrawOverlays) ? const Color(0xFF30D158) : const Color(0xFF8E8E93),
+            badgeColor: (_floatingCapyEnabled && _canDrawOverlays) ? AppColors.capybaraAmber : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
               value: _floatingCapyEnabled && _canDrawOverlays,
-              activeTrackColor: const Color(0xFF00C7BE),
-              activeThumbColor: Colors.white,
+              activeTrackColor: AppColors.capybaraAmber,
+              activeThumbColor: const Color(0xFF09090B),
               onChanged: (val) async {
                 if (val && !_canDrawOverlays) {
                   await WidgetLaunchService.requestOverlayPermission();
@@ -111,14 +112,15 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                           await WidgetLaunchService.requestOverlayPermission();
                           _checkOverlayPermission();
                         },
-                        icon: const Icon(Icons.layers_outlined, size: 16, color: Color(0xFF00C7BE)),
+                        icon: const Icon(Icons.layers_outlined, size: 16, color: AppColors.capybaraAmber),
                         label: const Text(
                           'Разрешить отображение поверх других окон',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF00C7BE), fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 12, color: AppColors.capybaraAmber, fontWeight: FontWeight.bold),
                         ),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Color(0xFF00C7BE)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          side: BorderSide(color: AppColors.capybaraAmber.withValues(alpha: 0.45)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                       ),
                     ),
@@ -133,11 +135,11 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Перехватывает экран подтверждения перевода от 500 сом в MBank и маркетплейсах. Поверх экрана всплывает системное окно: «Точно переводим? А как же цель на $dreamGoalTitle?».',
             badge: (widget.controller.capybaraFilterEnabled && _canDrawOverlays) ? 'АКТИВЕН' : (_canDrawOverlays ? 'ОТКЛ' : 'ТРЕБУЕТ ДОСТУП'),
-            badgeColor: (widget.controller.capybaraFilterEnabled && _canDrawOverlays) ? const Color(0xFF30D158) : const Color(0xFF8E8E93),
+            badgeColor: (widget.controller.capybaraFilterEnabled && _canDrawOverlays) ? AppColors.capybaraAmber : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
               value: widget.controller.capybaraFilterEnabled && _canDrawOverlays,
-              activeTrackColor: const Color(0xFF00C7BE),
-              activeThumbColor: Colors.white,
+              activeTrackColor: AppColors.capybaraAmber,
+              activeThumbColor: const Color(0xFF09090B),
               onChanged: (val) async {
                 if (val && !_canDrawOverlays) {
                   await WidgetLaunchService.requestOverlayPermission();
@@ -157,7 +159,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Моментально ловит скопированные суммы от друзей («Закинь 1200 сом за обед») и выдает быстрое Toast-действие.',
             badge: 'РАБОТАЕТ',
-            badgeColor: const Color(0xFF30D158),
+            badgeColor: AppColors.capybaraAmber,
             customAction: Padding(
               padding: const EdgeInsets.only(top: 10),
               child: SizedBox(
@@ -173,14 +175,15 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.content_paste_go_rounded, size: 16, color: Colors.white70),
+                  icon: const Icon(Icons.content_paste_go_rounded, size: 16, color: AppColors.capybaraAmber),
                   label: const Text(
                     'Скопировать тест: «Закинь 1200 сом за обед»',
                     style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600),
                   ),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
@@ -188,15 +191,13 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
           ),
           const SizedBox(height: 14),
 
-
-
           // 4. AR Receipt Scanner
           _buildFeatureCard(
             title: 'AR-сканер чеков с Vision AI',
             subtitle:
                 'Наведи камеру на чек из «Фрунзе» или кафе. Vision AI мгновенно распознает позиции, а AR-капибара выдаст поп-ап с реакцией («Опять энергетики? Отдалил себя от $dreamGoalTitle на 200 сом») и умным округлением.',
             badge: 'VISION AI',
-            badgeColor: const Color(0xFF00C7BE),
+            badgeColor: AppColors.capybaraAmber,
             customAction: Padding(
               padding: const EdgeInsets.only(top: 10),
               child: SizedBox(
@@ -210,15 +211,16 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.document_scanner_rounded, size: 16, color: Colors.black),
+                  icon: const Icon(Icons.document_scanner_rounded, size: 16, color: Color(0xFF09090B)),
                   label: const Text(
                     'Запустить AR-сканер чеков',
-                    style: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 12, color: Color(0xFF09090B), fontWeight: FontWeight.w800),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00C7BE),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    backgroundColor: AppColors.capybaraAmber,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
@@ -236,11 +238,11 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Использует системные права AccessibilityService: при открытии Instagram, TikTok, YouTube показывает строгий полноэкранный экран Капибары-Диктатора поверх приложения. Никаких продлений на 15–20 минут! Доступ закрыт, пока не сделаешь 20 подтягиваний в ARC Finance или не закроешь соцсеть.',
             badge: _socialBlockerEnabled ? 'ЖЕСТКИЙ ДИКТАТОР' : 'ОТКЛ',
-            badgeColor: _socialBlockerEnabled ? const Color(0xFFFF453A) : const Color(0xFF8E8E93),
+            badgeColor: _socialBlockerEnabled ? AppColors.capybaraAmber : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
               value: _socialBlockerEnabled,
-              activeTrackColor: const Color(0xFFFF453A),
-              activeThumbColor: Colors.white,
+              activeTrackColor: AppColors.capybaraAmber,
+              activeThumbColor: const Color(0xFF09090B),
               onChanged: (val) async {
                 try {
                   final prefs = await SharedPreferences.getInstance();
@@ -292,14 +294,15 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                           controller: widget.controller,
                         );
                       },
-                      icon: const Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFFFF453A)),
+                      icon: const Icon(Icons.lock_clock_rounded, size: 16, color: AppColors.capybaraAmber),
                       label: const Text(
                         'Симуляция блокировки соцсетей (20 подтягиваний)',
-                        style: TextStyle(fontSize: 11.5, color: Color(0xFFFF453A), fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11.5, color: AppColors.capybaraAmber, fontWeight: FontWeight.bold),
                       ),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFFF453A)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: BorderSide(color: AppColors.capybaraAmber.withValues(alpha: 0.45)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
@@ -315,11 +318,11 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Завис около Фаизы или в Дордой Плазе? Телефон жестко завибрирует и выдаст пуш: «Я всё вижу. Убери кошелек, мы копим на Mac M3!».',
             badge: GeoshameService.isEnabled ? 'РАДАР АКТИВЕН' : 'ОТКЛ',
-            badgeColor: GeoshameService.isEnabled ? const Color(0xFFFF453A) : const Color(0xFF8E8E93),
+            badgeColor: GeoshameService.isEnabled ? AppColors.capybaraAmber : const Color(0xFF8E8E93),
             trailingWidget: Switch.adaptive(
               value: GeoshameService.isEnabled,
-              activeTrackColor: const Color(0xFFFF453A),
-              activeThumbColor: Colors.white,
+              activeTrackColor: AppColors.capybaraAmber,
+              activeThumbColor: const Color(0xFF09090B),
               onChanged: (val) {
                 GeoshameService.setEnabled(val);
                 setState(() {});
@@ -339,14 +342,15 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                           notificationController: widget.notificationController,
                         );
                       },
-                      icon: const Icon(Icons.warning_amber_rounded, size: 15, color: Color(0xFFFF453A)),
+                      icon: const Icon(Icons.warning_amber_rounded, size: 15, color: AppColors.capybaraAmber),
                       label: const Text(
                         'Тест: Фаиза',
-                        style: TextStyle(fontSize: 11, color: Color(0xFFFF453A), fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFFF453A)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
                       ),
                     ),
                   ),
@@ -361,14 +365,15 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                           notificationController: widget.notificationController,
                         );
                       },
-                      icon: const Icon(Icons.shopping_cart_outlined, size: 15, color: Color(0xFFFF9F0A)),
+                      icon: const Icon(Icons.shopping_cart_outlined, size: 15, color: AppColors.capybaraAmber),
                       label: const Text(
                         'Тест: Дордой',
-                        style: TextStyle(fontSize: 11, color: Color(0xFFFF9F0A), fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFFF9F0A)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
                       ),
                     ),
                   ),
@@ -384,7 +389,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Трата превышает лимит на «Развлечения»? Транзакция одобрится, но капибара назначит 25 подтягиваний на турнике или 50 отжиманий для спасения стрика.',
             badge: 'СТРИТЛИФТИНГ',
-            badgeColor: const Color(0xFFFF9F0A),
+            badgeColor: AppColors.capybaraAmber,
             customAction: Padding(
               padding: const EdgeInsets.only(top: 10),
               child: SizedBox(
@@ -405,15 +410,16 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                       controller: widget.controller,
                     );
                   },
-                  icon: const Icon(Icons.fitness_center_rounded, size: 16, color: Colors.black),
+                  icon: const Icon(Icons.fitness_center_rounded, size: 16, color: Color(0xFF09090B)),
                   label: const Text(
                     'Демонстрация штрафа (25 подтягиваний)',
-                    style: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 12, color: Color(0xFF09090B), fontWeight: FontWeight.w800),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9F0A),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    backgroundColor: AppColors.capybaraAmber,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
@@ -427,7 +433,7 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
             subtitle:
                 'Токсичный воскресный отчет. Отправляет твои чеки в Gemini или встроенный бишкекский сленг-движок и жестко разносит за такси, лагманы и шоппинг.',
             badge: 'ТОКСИК-МОД',
-            badgeColor: const Color(0xFFFF453A),
+            badgeColor: AppColors.capybaraAmber,
             customAction: Padding(
               padding: const EdgeInsets.only(top: 10),
               child: SizedBox(
@@ -440,15 +446,17 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.local_fire_department_rounded, size: 16, color: Colors.black),
+                  icon: const Icon(Icons.local_fire_department_rounded, size: 16, color: AppColors.capybaraAmber),
                   label: const Text(
                     'Открыть Нейро-прожарку (AI Roast)',
-                    style: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF453A),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    backgroundColor: const Color(0xFF1B1B1F),
+                    side: BorderSide(color: AppColors.capybaraAmber.withValues(alpha: 0.45)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
@@ -483,9 +491,19 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
+        color: const Color(0xFF131316),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -498,10 +516,14 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                       decoration: BoxDecoration(
-                        color: badgeColor.withValues(alpha: 0.15),
+                        color: badgeColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: badgeColor.withValues(alpha: 0.25),
+                          width: 0.8,
+                        ),
                       ),
                       child: Text(
                         badge,
@@ -531,8 +553,8 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
           const SizedBox(height: 8),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: Color(0xFF8E8E93),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.65),
               fontSize: 12.5,
               height: 1.35,
             ),
@@ -547,18 +569,18 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: Colors.white70),
+          Icon(icon, size: 12, color: AppColors.capybaraAmber.withValues(alpha: 0.85)),
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(fontSize: 10.5, color: Colors.white70, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w600),
           ),
         ],
       ),

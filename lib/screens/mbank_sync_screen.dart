@@ -110,7 +110,25 @@ class _MBankSyncScreenState extends State<MBankSyncScreen> with WidgetsBindingOb
       final source = notif['source'] as String? ?? 'notification';
       final text = '$title $body'.trim();
 
-      final parsed = MBankParserService.parse(text);
+      var parsed = MBankParserService.parse(text);
+      if (parsed == null) {
+        final fallbackAmount = (notif['amount'] as num?)?.toDouble() ?? 0.0;
+        if (fallbackAmount > 0) {
+          final targetId = notif['targetIdentifier'] as String? ?? 'UNKNOWN';
+          final isIncome = text.toLowerCase().contains('пополнен') ||
+              text.toLowerCase().contains('зачислен') ||
+              text.toLowerCase().contains('перевели');
+          parsed = ParsedMBankNotification(
+            amount: fallbackAmount,
+            type: isIncome ? TransactionType.income : TransactionType.expense,
+            title: targetId != 'UNKNOWN' ? targetId : (title.isNotEmpty ? title : 'MBank'),
+            categoryId: isIncome ? 'cat_other_income' : 'cat_other_expense',
+            rawText: text,
+            timestamp: DateTime.now(),
+          );
+        }
+      }
+
       if (parsed != null) {
         final origin = source == 'accessibility_screen' ? 'Экран MBank' : 'Push MBank';
         widget.controller.addMBankAutoTransaction(

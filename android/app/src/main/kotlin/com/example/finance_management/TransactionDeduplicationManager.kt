@@ -1,8 +1,13 @@
 package com.example.finance_management
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -18,6 +23,7 @@ class TransactionDeduplicationManager private constructor(private val context: C
         private const val TAG = "TxDedupManager"
         const val PREFS_KEY_PENDING_TXS = "arc_pending_bank_notifications"
         const val ACTION_TRANSACTION_EVENT = "com.example.finance_management.BANK_NOTIFICATION_RECEIVED"
+        private const val NOTIFICATION_CHANNEL_ID = "arc_finance_channel"
 
         @Volatile
         private var instance: TransactionDeduplicationManager? = null
@@ -119,6 +125,7 @@ class TransactionDeduplicationManager private constructor(private val context: C
 
         saveToFlutterPendingQueue(tx)
         broadcastTransactionEvent(tx)
+        postSystemNotification(tx)
 
         Log.i(TAG, "CONFIRMED_UI transaction recorded: $amount $currency to $targetIdentifier ($title)")
         return tx
@@ -201,9 +208,70 @@ class TransactionDeduplicationManager private constructor(private val context: C
 
         saveToFlutterPendingQueue(tx)
         broadcastTransactionEvent(tx)
+        postSystemNotification(tx)
 
         Log.i(TAG, "CONFIRMED_PUSH recorded: $amount $currency ($title)")
         return tx
+    }
+
+    private fun postSystemNotification(tx: StoredTransaction) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID,
+                    "ARC Finance Уведомления",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Автоматический шлюз банковских операций"
+                    enableVibration(true)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = if (launchIntent != null) {
+                PendingIntent.getActivity(
+                    context,
+                    (tx.id % 50000).toInt(),
+                    launchIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            } else null
+
+            val cleanAmt = String.format(Locale.US, "%.2f", tx.amount)
+            val titleText = if (tx.title.isNotEmpty() && tx.title != "MBank") {
+                tx.title
+            } else {
+                "Перевод зафиксирован: −$cleanAmt сом"
+            }
+
+            val targetDesc = if (tx.targetIdentifier.isNotEmpty() && tx.targetIdentifier != "UNKNOWN") {
+                tx.targetIdentifier
+            } else {
+                "MBank"
+            }
+            val bodyText = "$targetDesc • −$cleanAmt сом зафиксировано в фоне"
+
+            val builder = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(titleText)
+                .setContentText(bodyText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(bodyText))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+
+            if (pendingIntent != null) {
+                builder.setContentIntent(pendingIntent)
+            }
+
+            notificationManager.notify((tx.id % 10000).toInt() + 8000, builder.build())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to post system notification: ${e.message}")
+        }
     }
 
     private fun saveToFlutterPendingQueue(tx: StoredTransaction) {

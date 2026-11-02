@@ -110,10 +110,12 @@ class _AddTransactionModalState extends State<AddTransactionModal> {
 
   void _addQuickAmount(int value) {
     final current =
-        double.tryParse(_amountController.text.replaceAll(' ', '')) ?? 0.0;
+        double.tryParse(_amountController.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0.0;
     final updated = current + value;
     setState(() {
-      _amountController.text = updated.toInt().toString();
+      _amountController.text = updated % 1 == 0
+          ? updated.toInt().toString()
+          : updated.toStringAsFixed(2);
     });
   }
 
@@ -394,7 +396,7 @@ class _AddTransactionModalState extends State<AddTransactionModal> {
                         child: TextField(
                           controller: _amountController,
                           focusNode: _amountFocusNode,
-                          autofocus: false,
+                          autofocus: widget.initialAmount == null || widget.initialAmount == 0.0,
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),

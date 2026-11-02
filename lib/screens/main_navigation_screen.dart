@@ -13,6 +13,7 @@ import '../services/mbank_parser_service.dart';
 import '../services/widget_launch_service.dart';
 import '../state/finance_controller.dart';
 import '../state/notification_controller.dart';
+import '../theme/app_colors.dart';
 import '../utils/formatters.dart';
 import '../widgets/add_transaction_modal.dart';
 import '../widgets/glass_container.dart';
@@ -842,19 +843,19 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
               // Floating Action Button (+) for instant Quick Add (warm Capybara Amber)
               Positioned(
                 right: 20,
-                bottom: 94,
+                bottom: 96,
                 child: FloatingActionButton(
                   heroTag: 'main_fab_add',
                   onPressed: () {
                     HapticFeedback.mediumImpact();
                     AddTransactionModal.show(context, widget.controller);
                   },
-                  backgroundColor: const Color(0xFFFF9F0A),
+                  backgroundColor: AppColors.capybaraAmber,
                   elevation: 6,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(18),
                     side: BorderSide(
-                      color: const Color(0xFFFF9F0A).withValues(alpha: 0.4),
+                      color: Colors.white.withValues(alpha: 0.25),
                       width: 1,
                     ),
                   ),
@@ -866,7 +867,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                 ),
               ),
 
-              // Floating Matte Frosted Glass Dock (4 Dedicated Tabs: Обзор, Операции, Аналитика, Профиль)
+              // Floating Liquid Glass Dock (4 Dedicated Tabs: Обзор, Операции, Аналитика, Профиль)
               Positioned(
                 left: 0,
                 right: 0,
@@ -877,13 +878,43 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: GlassContainer(
-                        height: 62,
-                        borderRadius: BorderRadius.circular(22),
-                        blur: 20,
-                        surfaceColor: const Color(0xFF141416).withValues(alpha: 0.94),
-                        borderColor: const Color(0xFFFF9F0A).withValues(alpha: 0.20),
-                        borderWidth: 0.8,
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        height: 66,
+                        borderRadius: BorderRadius.circular(26),
+                        blur: 24,
+                        surfaceGradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.12),
+                            const Color(0xFF141419).withValues(alpha: 0.58),
+                            const Color(0xFF09090D).withValues(alpha: 0.72),
+                          ],
+                          stops: const [0.0, 0.35, 1.0],
+                        ),
+                        borderGradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.36),
+                            Colors.white.withValues(alpha: 0.12),
+                            Colors.white.withValues(alpha: 0.04),
+                          ],
+                        ),
+                        borderWidth: 1.0,
+                        shadows: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.40),
+                            blurRadius: 30,
+                            offset: const Offset(0, 10),
+                            spreadRadius: -2,
+                          ),
+                          BoxShadow(
+                            color: AppColors.capybaraAmber.withValues(alpha: 0.05),
+                            blurRadius: 20,
+                            offset: const Offset(0, 0),
+                          ),
+                        ],
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
@@ -928,18 +959,39 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   }) {
     final isSelected = _currentIndex == index;
     return Expanded(
-      child: InkWell(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () => _switchTab(index),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           padding: const EdgeInsets.symmetric(vertical: 5),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppColors.capybaraAmber.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+            border: isSelected
+                ? Border.all(
+                    color: AppColors.capybaraAmber.withValues(alpha: 0.35),
+                    width: 0.8,
+                  )
+                : null,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 21,
-                color: isSelected ? const Color(0xFFFF9F0A) : Colors.white.withValues(alpha: 0.38),
+              AnimatedScale(
+                scale: isSelected ? 1.08 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                child: Icon(
+                  icon,
+                  size: 21,
+                  color: isSelected ? AppColors.capybaraAmber : Colors.white.withValues(alpha: 0.42),
+                ),
               ),
               const SizedBox(height: 3),
               FittedBox(
@@ -948,8 +1000,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                   label,
                   style: TextStyle(
                     fontSize: 9.5,
-                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w400,
-                    color: isSelected ? const Color(0xFFFF9F0A) : Colors.white.withValues(alpha: 0.38),
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                    color: isSelected ? AppColors.capybaraAmber : Colors.white.withValues(alpha: 0.42),
+                    letterSpacing: 0.2,
                   ),
                   maxLines: 1,
                 ),

@@ -14,7 +14,12 @@ object BankPatternConfig {
     // Whitelist of banking & mobile wallet packages
     val WHITELIST_PACKAGES = setOf(
         "com.maanavan.mb_kyrgyzstan", // Official MBank Google Play ID
+        "kg.mbank.app",
         "com.cbk.mbank",
+        "com.cbk.android",
+        "kg.cbk.mbank",
+        "kg.cbk.android",
+        "com.mbank",
         "com.doscredo.simbank",
         "kg.optima.app",
         "kg.optima24.android",
@@ -39,19 +44,58 @@ object BankPatternConfig {
         "com.android.mms"
     )
 
-    // Markers indicating successful transaction screen on UI (Section 3.1)
+    // Markers indicating successful transaction or receipt screen on UI
     val SUCCESS_SCREEN_MARKERS = listOf(
         "перевод выполнен",
-        "чек",
-        "успешно",
-        "отправлено",
-        "транзакция завершена",
-        "платеж проведен",
+        "перевод отправлен",
+        "деньги отправлены",
+        "переведено",
+        "перевод успешен",
+        "перевод совершен",
         "платеж выполнен",
+        "платеж проведен",
+        "платеж совершен",
         "оплата проведена",
         "оплата прошла",
         "операция выполнена",
-        "деньги отправлены"
+        "транзакция завершена",
+        "успешно",
+        "исполнен",
+        "принят в обработку",
+        "в обработке",
+        "чек",
+        "квитанция",
+        "детали перевода",
+        "детали платежа",
+        "детали операции",
+        "поделиться чеком",
+        "поделиться квитанцией",
+        "сохранить чек",
+        "готово",
+        "отправлено"
+    )
+
+    // Buttons triggering transfer execution in banking apps
+    val TRANSFER_ACTION_BUTTONS = listOf(
+        "перевести",
+        "оплатить",
+        "подтвердить",
+        "отправить",
+        "продолжить"
+    )
+
+    // Screens indicating transfer failure or error
+    val ERROR_SCREEN_MARKERS = listOf(
+        "ошибка",
+        "недостаточно средств",
+        "отклонен",
+        "отклонена",
+        "сбой",
+        "повторите попытку",
+        "не удалось",
+        "платеж отклонен",
+        "перевод отклонен",
+        "лимит исчерпан"
     )
 
     // Regex specified in Section 3.1 for amount parsing with thousand separators and decimals
@@ -101,11 +145,13 @@ object BankPatternConfig {
 
     // Recipient extraction regex patterns
     val RECIPIENT_PATTERNS = listOf(
-        Pattern.compile("получател[ьяе][:\\s]+([\\p{L}\\s]{3,35})", Pattern.CASE_INSENSITIVE),
-        Pattern.compile("кому[:\\s]+([\\p{L}\\s]{3,35})", Pattern.CASE_INSENSITIVE),
-        Pattern.compile("клиент[:\\s]+([\\p{L}\\s]{3,35})", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("получател[ьяе][:\\s]+([\\p{L}\\s.]{3,40})", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("кому[:\\s]+([\\p{L}\\s.]{3,40})", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("клиент[:\\s]+([\\p{L}\\s.]{3,40})", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("перевод клиенту[:\\s]+([\\p{L}\\s.]{3,40})", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("фио[:\\s]+([\\p{L}\\s.]{3,40})", Pattern.CASE_INSENSITIVE),
         Pattern.compile("(?:на карту|карта)[:\\s]*([*0-9\\s]{4,19})", Pattern.CASE_INSENSITIVE),
-        Pattern.compile("(?:на номер|номер|тел)[:\\s]*(\\+?[0-9\\s-]{9,15})", Pattern.CASE_INSENSITIVE)
+        Pattern.compile("(?:на номер|номер|тел)[:\\s]*(\\+?[0-9\\s-]{9,18})", Pattern.CASE_INSENSITIVE)
     )
 
     fun isWhitelistedPackage(pkg: String): Boolean {
@@ -135,6 +181,11 @@ object BankPatternConfig {
     fun isSuccessScreen(combinedText: String): Boolean {
         val lower = combinedText.lowercase()
         return SUCCESS_SCREEN_MARKERS.any { lower.contains(it) }
+    }
+
+    fun isErrorScreen(combinedText: String): Boolean {
+        val lower = combinedText.lowercase()
+        return ERROR_SCREEN_MARKERS.any { lower.contains(it) }
     }
 
     fun isStopWordPush(text: String): Boolean {
