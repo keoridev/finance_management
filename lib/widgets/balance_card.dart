@@ -65,7 +65,6 @@ class BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Total Balance with responsive scale & rapid count-up animation
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -81,17 +80,14 @@ class BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
-          // Subtle hairline divider
           Container(
             height: 0.8,
             color: Colors.white.withValues(alpha: 0.08),
           ),
           const SizedBox(height: 14),
 
-          // Income and Expense Statistics
           Row(
             children: [
-              // Доходы
               Expanded(
                 child: Row(
                   children: [

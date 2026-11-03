@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/account.dart';
@@ -1454,6 +1454,7 @@ class FinanceController extends ChangeNotifier {
     String? categoryId,
     String? note,
     double? balanceAfter,
+    bool isBalanceOnly = false,
   }) {
     // Find MBank account or first card account
     final mbankIndex = _accounts.indexWhere(
@@ -1463,19 +1464,43 @@ class FinanceController extends ChangeNotifier {
         ? _accounts[mbankIndex].id
         : (_accounts.isNotEmpty ? _accounts.first.id : 'acc_mbank');
 
-    // Strict Multi-Layer Deduplication: Prevent duplicate recordings (e.g. push notification + accessibility screen receipt)
+    // Если это информационный пуш/экран только с балансом (без операции)
+    if (isBalanceOnly) {
+      if (balanceAfter != null && balanceAfter > 0 && mbankIndex != -1) {
+        final currentBal = _accounts[mbankIndex].balance;
+        if ((currentBal - balanceAfter).abs() > 0.01) {
+          _accounts[mbankIndex] = _accounts[mbankIndex].copyWith(balance: balanceAfter);
+          invalidateCapybaraHealthCache();
+          _saveToStorage();
+          notifyListeners();
+          debugPrint('[FinanceController] Balance-only update: $balanceAfter сом (было $currentBal)');
+        }
+      }
+      return false;
+    }
+
+    // Игнорируем нулевые или ошибочные суммы из истории/экрана
+    if (amount <= 0) {
+      debugPrint('[FinanceController] Skipped zero-amount bank notification: $title');
+      if (balanceAfter != null && balanceAfter > 0 && mbankIndex != -1) {
+        _accounts[mbankIndex] = _accounts[mbankIndex].copyWith(balance: balanceAfter);
+        _saveToStorage();
+        notifyListeners();
+      }
+      return false;
+    }
+
+    // Защита от дубликатов (например экран чека + пуш)
     final now = DateTime.now();
     final hasRecentDuplicate = _transactions.any((tx) {
       final isSameAmount = (tx.amount - amount).abs() < 0.01;
       final isSameType = tx.type == type;
       if (!isSameAmount || !isSameType) return false;
 
-      // 1. Any matching transaction within 60 minutes
       if (now.difference(tx.date).inSeconds.abs() < 3600) {
         return true;
       }
 
-      // 2. Same calendar day with matching title or bank auto-sync note
       final isSameDay = tx.date.year == now.year &&
           tx.date.month == now.month &&
           tx.date.day == now.day;
@@ -1516,10 +1541,10 @@ class FinanceController extends ChangeNotifier {
       isAutoBank: true,
     );
 
-    // If bank notification explicitly stated current balance and it differs, update it cleanly
+    // Если банк четко указал остаток на счете, он является источником правды
     if (balanceAfter != null && balanceAfter > 0) {
       final targetIdx = mbankIndex != -1 ? mbankIndex : (_accounts.isNotEmpty ? 0 : -1);
-      if (targetIdx != -1 && (_accounts[targetIdx].balance - balanceAfter).abs() > 0.01) {
+      if (targetIdx != -1) {
         _accounts[targetIdx] = _accounts[targetIdx].copyWith(balance: balanceAfter);
         invalidateCapybaraHealthCache();
         _saveToStorage();
@@ -1528,7 +1553,6 @@ class FinanceController extends ChangeNotifier {
     }
     return true;
   }
-
   bool updateScrapedBankBalance(String bankName, double newBalance) {
     if (!_isStorageLoaded) return false;
     if (newBalance <= 0) return false;

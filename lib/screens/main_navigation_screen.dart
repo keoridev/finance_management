@@ -1,4 +1,5 @@
-import 'dart:async';
+﻿import 'dart:async';
+import 'dart:ui';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -867,78 +868,88 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                 ),
               ),
 
-              // Floating Liquid Glass Dock (4 Dedicated Tabs: Обзор, Операции, Аналитика, Профиль)
+              // Floating Liquid Glass Dock (Жидкое стекло: чистая органика, мягкий рефракционный блюр)
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 20,
+                bottom: 22,
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 500),
+                    constraints: const BoxConstraints(maxWidth: 480),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: GlassContainer(
-                        height: 66,
-                        borderRadius: BorderRadius.circular(26),
-                        blur: 24,
-                        surfaceGradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.white.withValues(alpha: 0.12),
-                            const Color(0xFF141419).withValues(alpha: 0.58),
-                            const Color(0xFF09090D).withValues(alpha: 0.72),
-                          ],
-                          stops: const [0.0, 0.35, 1.0],
-                        ),
-                        borderGradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.white.withValues(alpha: 0.36),
-                            Colors.white.withValues(alpha: 0.12),
-                            Colors.white.withValues(alpha: 0.04),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: Container(
+                        height: 68,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(34),
+                          boxShadow: [
+                            // Глубокая рассеянная тень парения
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              blurRadius: 36,
+                              offset: const Offset(0, 14),
+                              spreadRadius: -4,
+                            ),
+                            // Нежный внутренний рефлекс стекла
+                            BoxShadow(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              blurRadius: 18,
+                              offset: const Offset(0, -2),
+                              spreadRadius: 0,
+                            ),
                           ],
                         ),
-                        borderWidth: 1.0,
-                        shadows: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.40),
-                            blurRadius: 30,
-                            offset: const Offset(0, 10),
-                            spreadRadius: -2,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(34),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(34),
+                                // Эффект настоящего жидкого стекла (Liquid Glass)
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.16),
+                                    const Color(0xFF1E2024).withValues(alpha: 0.45),
+                                    const Color(0xFF0F1013).withValues(alpha: 0.65),
+                                  ],
+                                  stops: const [0.0, 0.40, 1.0],
+                                ),
+                                border: Border.all(
+                                  width: 1.2,
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  _buildNavItem(
+                                    index: 0,
+                                    icon: Icons.grid_view_rounded,
+                                    label: 'Обзор',
+                                  ),
+                                  _buildNavItem(
+                                    index: 1,
+                                    icon: Icons.receipt_long_rounded,
+                                    label: 'Операции',
+                                  ),
+                                  _buildNavItem(
+                                    index: 2,
+                                    icon: Icons.pie_chart_rounded,
+                                    label: 'Аналитика',
+                                  ),
+                                  _buildNavItem(
+                                    index: 3,
+                                    icon: Icons.person_rounded,
+                                    label: 'Профиль',
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                          BoxShadow(
-                            color: AppColors.capybaraAmber.withValues(alpha: 0.05),
-                            blurRadius: 20,
-                            offset: const Offset(0, 0),
-                          ),
-                        ],
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildNavItem(
-                              index: 0,
-                              icon: Icons.grid_view_rounded,
-                              label: 'Обзор',
-                            ),
-                            _buildNavItem(
-                              index: 1,
-                              icon: Icons.receipt_long_rounded,
-                              label: 'Операции',
-                            ),
-                            _buildNavItem(
-                              index: 2,
-                              icon: Icons.pie_chart_rounded,
-                              label: 'Аналитика',
-                            ),
-                            _buildNavItem(
-                              index: 3,
-                              icon: Icons.person_rounded,
-                              label: 'Профиль',
-                            ),
-                          ],
                         ),
                       ),
                     ),
@@ -963,21 +974,32 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         behavior: HitTestBehavior.opaque,
         onTap: () => _switchTab(index),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
+          duration: const Duration(milliseconds: 250),
           curve: Curves.easeOutCubic,
-          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          padding: const EdgeInsets.symmetric(vertical: 5),
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: isSelected
-                ? AppColors.capybaraAmber.withValues(alpha: 0.14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
-            border: isSelected
-                ? Border.all(
-                    color: AppColors.capybaraAmber.withValues(alpha: 0.35),
-                    width: 0.8,
+            // Стеклянная капля-индикатор под выбранным табом
+            gradient: isSelected
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.18),
+                      Colors.white.withValues(alpha: 0.06),
+                    ],
                   )
                 : null,
+            borderRadius: BorderRadius.circular(24),
+            border: isSelected
+                ? Border.all(
+                    color: Colors.white.withValues(alpha: 0.22),
+                    width: 0.9,
+                  )
+                : Border.all(
+                    color: Colors.transparent,
+                    width: 0.9,
+                  ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -985,26 +1007,27 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
             children: [
               AnimatedScale(
                 scale: isSelected ? 1.08 : 1.0,
-                duration: const Duration(milliseconds: 200),
+                duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutBack,
                 child: Icon(
                   icon,
                   size: 21,
-                  color: isSelected ? AppColors.capybaraAmber : Colors.white.withValues(alpha: 0.42),
+                  color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.40),
                 ),
               ),
               const SizedBox(height: 3),
-              FittedBox(
-                fit: BoxFit.scaleDown,
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.40),
+                  letterSpacing: -0.1,
+                ),
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                    color: isSelected ? AppColors.capybaraAmber : Colors.white.withValues(alpha: 0.42),
-                    letterSpacing: 0.2,
-                  ),
                   maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

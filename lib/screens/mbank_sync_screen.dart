@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/transaction_type.dart';
@@ -130,6 +130,13 @@ class _MBankSyncScreenState extends State<MBankSyncScreen> with WidgetsBindingOb
       }
 
       if (parsed != null) {
+        if (parsed.isBalanceOnly) {
+          if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
+            widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+          }
+          continue;
+        }
+
         final origin = source == 'accessibility_screen' ? 'Экран MBank' : 'Push MBank';
         widget.controller.addMBankAutoTransaction(
           title: parsed.title,
@@ -138,6 +145,7 @@ class _MBankSyncScreenState extends State<MBankSyncScreen> with WidgetsBindingOb
           categoryId: parsed.categoryId,
           note: '$origin: $text',
           balanceAfter: parsed.balanceAfter,
+          isBalanceOnly: parsed.isBalanceOnly,
         );
         count++;
       }
@@ -176,14 +184,21 @@ class _MBankSyncScreenState extends State<MBankSyncScreen> with WidgetsBindingOb
     if (_parsedTestResult == null) return;
     HapticFeedback.mediumImpact();
 
-    widget.controller.addMBankAutoTransaction(
-      title: _parsedTestResult!.title,
-      amount: _parsedTestResult!.amount,
-      type: _parsedTestResult!.type,
-      categoryId: _parsedTestResult!.categoryId,
-      note: 'Тестовый парсер: ${_parsedTestResult!.rawText}',
-      balanceAfter: _parsedTestResult!.balanceAfter,
-    );
+    if (_parsedTestResult!.isBalanceOnly) {
+      if (_parsedTestResult!.balanceAfter != null && _parsedTestResult!.balanceAfter! > 0) {
+        widget.controller.updateScrapedBankBalance('MBank', _parsedTestResult!.balanceAfter!);
+      }
+    } else {
+      widget.controller.addMBankAutoTransaction(
+        title: _parsedTestResult!.title,
+        amount: _parsedTestResult!.amount,
+        type: _parsedTestResult!.type,
+        categoryId: _parsedTestResult!.categoryId,
+        note: 'Тестовый парсер: ${_parsedTestResult!.rawText}',
+        balanceAfter: _parsedTestResult!.balanceAfter,
+        isBalanceOnly: _parsedTestResult!.isBalanceOnly,
+      );
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

@@ -1,4 +1,4 @@
-package com.example.finance_management
+﻿package com.example.finance_management
 
 import android.accessibilityservice.AccessibilityService
 import android.app.AlarmManager
@@ -374,7 +374,38 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // FEATURE 1: POST-TRANSACTION RECEIPT CAPTURE + SMART AUTOCATEGORIZATION
     // =========================================================================
 
+    private fun isHistoryScreen(fullCombined: String): Boolean {
+        // Если экран содержит явные маркеры истории транзакций / выписки
+        val hasHistoryTitle = fullCombined.contains("история") ||
+                fullCombined.contains("история операций") ||
+                fullCombined.contains("история платежей") ||
+                fullCombined.contains("история переводов") ||
+                fullCombined.contains("выписка") ||
+                fullCombined.contains("все операции") ||
+                fullCombined.contains("архив операций") ||
+                fullCombined.contains("тарых") || // кыргызский: тарых (история)
+                fullCombined.contains("акыркы аракеттер")
+
+        if (!hasHistoryTitle) return false
+
+        // Чек/квитанция обычно НЕ содержат слова фильтров истории: "все", "за месяц", "фильтр", "период"
+        val hasHistoryControls = fullCombined.contains("фильтр") ||
+                fullCombined.contains("период") ||
+                fullCombined.contains("за месяц") ||
+                fullCombined.contains("за сегодня") ||
+                fullCombined.contains("за неделю") ||
+                fullCombined.contains("категории") ||
+                fullCombined.contains("поиск по операциям")
+
+        return hasHistoryControls || hasHistoryTitle
+    }
+
     private fun isReceiptScreenText(fullCombined: String): Boolean {
+        // Никогда не парсим экран истории операций как отдельный чек!
+        if (isHistoryScreen(fullCombined)) {
+            return false
+        }
+
         return BankPatternConfig.isSuccessScreen(fullCombined) ||
                 fullCombined.contains("успешно") ||
                 fullCombined.contains("перевод выполнен") ||
@@ -402,7 +433,6 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 fullCombined.contains("сохранить чек") ||
                 (fullCombined.contains("готово") && (fullCombined.contains("перевод") || fullCombined.contains("оплата") || fullCombined.contains("сом")))
     }
-
     private fun handleViewClicked(event: AccessibilityEvent, pkg: String) {
         try {
             val clickedText = (event.text?.joinToString(" ") ?: event.contentDescription?.toString() ?: "").lowercase(Locale.ROOT)
@@ -421,6 +451,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             val merchantInfo = extractMerchantAndCategory(texts, fullCombined, false)
             val target = merchantInfo.first
 
+            updateBubbleStatus("- с", "Отправка...", isAlert = true)
             Log.i(TAG, "Transfer click detected ($clickedText). Staging transfer: $amount SOM to $target")
 
             pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -480,6 +511,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         // Remaining balance if visible
         val balanceAfter = extractBalanceAfter(fullCombined)
 
+        val sign = if (isIncome) "+" else "-"
+        updateBubbleStatus("$sign с", "Записано!", isAlert = false)
         Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title")
         commitTransfer(amount, title, pkg, fullCombined, isIncome, balanceAfter)
     }
@@ -560,6 +593,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         val amount = extractAmountFromTexts(texts, fullCombined) ?: return
         if (amount <= 0.0) return
 
+        // Обновляем плавающую капибару в реальном времени: она видит сумму перевода!
+        val formattedAmt = " с"
+        updateBubbleStatus("-", "Перевод?", isAlert = true)
+
         // Read user config from SharedPreferences
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val isFilterEnabled = if (prefs.contains("flutter.arc_capybara_filter_enabled")) {
@@ -582,7 +619,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         val dreamGoal = prefs.getString("flutter.arc_active_dream_goal", "MacBook Pro M3") ?: "MacBook Pro M3"
         val remainingGoal = prefs.getFloat("flutter.arc_active_dream_remaining", 120_000.0f).toDouble()
 
-        Log.i(TAG, "Triggering Capybara Pre-Transaction Filter for amount: $amount SOM")
+        Log.i(TAG, "Triggering Capybara Pre-Transaction Filter for amount:  SOM")
 
         mainHandler.post {
             showCapybaraOverlay(amount, dreamGoal, remainingGoal)
@@ -794,6 +831,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun isDashboardScreen(fullCombined: String): Boolean {
+        if (isHistoryScreen(fullCombined)) {
+            return false
+        }
         return (fullCombined.contains("карты") ||
                 fullCombined.contains("мои карты") ||
                 fullCombined.contains("счета") ||
@@ -827,6 +867,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         lastScrapedBalances[bankName] = balance
         lastScrapedTimestamps[bankName] = now
 
+        updateBubbleStatus(" с", "Баланс OK", isAlert = false)
         Log.i(TAG, "Shadow balance scraped! Bank: $bankName, Balance: $balance SOM")
 
         broadcastScrapedBalance(bankName, balance, now)
@@ -1252,6 +1293,47 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // FEATURE 5: FLOATING CAPYBARA CHAT HEAD & QUICK ENTRY OVERLAY SHEET
     // =========================================================================
 
+        private var bubbleStatusText: TextView? = null
+    private var bubbleSubtitleText: TextView? = null
+    private var bubbleContainer: FrameLayout? = null
+
+    private fun updateBubbleStatus(status: String, subtitle: String? = null, isAlert: Boolean = false) {
+        mainHandler.post {
+            bubbleStatusText?.let { tv ->
+                tv.text = status
+                if (isAlert) {
+                    tv.setTextColor(Color.parseColor("#FF453A")) // Red warning
+                } else {
+                    tv.setTextColor(Color.parseColor("#FF9F0A")) // Amber gold
+                }
+            }
+            bubbleSubtitleText?.let { sub ->
+                if (subtitle != null) {
+                    sub.text = subtitle
+                    sub.visibility = View.VISIBLE
+                    if (isAlert) {
+                        sub.setTextColor(Color.parseColor("#FF6961"))
+                    } else {
+                        sub.setTextColor(Color.parseColor("#8E8E93"))
+                    }
+                } else {
+                    sub.text = "Следит"
+                    sub.visibility = View.VISIBLE
+                    sub.setTextColor(Color.parseColor("#8E8E93"))
+                }
+            }
+            bubbleContainer?.let { container ->
+                val bg = GradientDrawable().apply {
+                    cornerRadius = dpToPx(24).toFloat()
+                    setColor(Color.parseColor("#F51C1A17"))
+                    val strokeColor = if (isAlert) Color.parseColor("#FF453A") else Color.parseColor("#FF9F0A")
+                    setStroke(dpToPx(2.2f), strokeColor)
+                }
+                container.background = bg
+            }
+        }
+    }
+
     private fun showFloatingBubble() {
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val isEnabled = if (prefs.contains("flutter.arc_floating_capy_enabled")) {
@@ -1259,7 +1341,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         } else if (prefs.contains("arc_floating_capy_enabled")) {
             prefs.getBoolean("arc_floating_capy_enabled", false)
         } else {
-            false
+            true // По умолчанию включено, чтобы плавающая капибара всегда помогала
         }
         if (!isEnabled) {
             if (floatingBubbleView != null) {
@@ -1272,7 +1354,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         try {
             val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val bubbleSize = dpToPx(60)
+            val bubbleWidth = dpToPx(74)
+            val bubbleHeight = dpToPx(62)
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
@@ -1284,28 +1367,30 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
 
             val params = WindowManager.LayoutParams(
-                bubbleSize,
-                bubbleSize,
+                bubbleWidth,
+                bubbleHeight,
                 layoutType,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = resources.displayMetrics.widthPixels - bubbleSize - dpToPx(14)
-                y = dpToPx(240)
+                x = resources.displayMetrics.widthPixels - bubbleWidth - dpToPx(14)
+                y = dpToPx(220)
             }
             bubbleParams = params
 
             val bubble = FrameLayout(this).apply {
                 val bg = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#F01C1A17")) // Obsidian Amber Glass
+                    cornerRadius = dpToPx(22).toFloat()
+                    setColor(Color.parseColor("#F51C1A17")) // Obsidian Amber Glass
                     setStroke(dpToPx(2.2f), Color.parseColor("#FF9F0A")) // Capybara Amber Glow
                 }
                 background = bg
                 elevation = dpToPx(14).toFloat()
+                setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
             }
+            bubbleContainer = bubble
 
             val capyContent = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1313,19 +1398,22 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
 
             val capyIcon = TextView(this).apply {
-                text = "ARC"
+                text = "Капибара"
                 setTextColor(Color.parseColor("#FF9F0A"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
             val capyBadge = TextView(this).apply {
-                text = "КАПИ"
-                setTextColor(Color.parseColor("#FF9F0A"))
+                text = "Следит"
+                setTextColor(Color.parseColor("#8E8E93"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 8.5f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
+            bubbleStatusText = capyIcon
+            bubbleSubtitleText = capyBadge
+
             capyContent.addView(capyIcon)
             capyContent.addView(capyBadge)
 
@@ -1405,6 +1493,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 windowManager.removeView(it)
             } catch (_: Exception) {}
             floatingBubbleView = null
+            bubbleContainer = null
+            bubbleStatusText = null
+            bubbleSubtitleText = null
         }
     }
 

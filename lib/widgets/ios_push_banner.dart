@@ -67,6 +67,7 @@ class _IosPushBannerState extends State<IosPushBanner> with SingleTickerProvider
                 borderRadius: BorderRadius.circular(22),
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                  
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
