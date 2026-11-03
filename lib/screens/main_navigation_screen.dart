@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:ui';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -35,10 +35,16 @@ class MainNavigationScreen extends StatefulWidget {
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   int _currentIndex = 0;
   late final PageController _pageController;
   late final NotificationController _notificationController;
+  late final AnimationController _entranceController;
+  late final Animation<double> _dockSlideAnimation;
+  late final Animation<double> _dockScaleAnimation;
+  late final Animation<double> _dockFadeAnimation;
+  late final Animation<double> _contentFadeAnimation;
+  late final Animation<double> _fabScaleAnimation;
   Timer? _clipboardTimer;
   Timer? _permissionTimer;
 
@@ -48,6 +54,47 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: _currentIndex);
     _notificationController = NotificationController();
+
+    // Opening entrance animation controller (snappy, delightful spring emergence)
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+
+    _contentFadeAnimation = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.0, 0.65, curve: Curves.easeOutCubic),
+    );
+
+    // Dock slides up IMMEDIATELY from 75px with zero artificial lag (no dead interval)
+    _dockSlideAnimation = Tween<double>(begin: 75.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.90, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    // Dock springs from 0.90 to 1.0 for dynamic physical pop-out
+    _dockScaleAnimation = Tween<double>(begin: 0.90, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.85, curve: Curves.easeOutBack),
+      ),
+    );
+
+    _dockFadeAnimation = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.0, 0.60, curve: Curves.easeOut),
+    );
+
+    _fabScaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.12, 0.85, curve: Curves.easeOutBack),
+      ),
+    );
+
+    _entranceController.forward();
     _notificationController.onOpenAddModal = () {
       if (mounted) {
         AddTransactionModal.show(context, widget.controller);
@@ -66,7 +113,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         if (mounted) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              AddTransactionModal.show(context, widget.controller, defaultType: type);
+              AddTransactionModal.show(
+                context,
+                widget.controller,
+                defaultType: type,
+              );
             }
           });
         }
@@ -81,7 +132,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         if (mounted) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              final penalty = widget.controller.activeWorkoutPenalty ??
+              final penalty =
+                  widget.controller.activeWorkoutPenalty ??
                   WorkoutPenalty(
                     id: 'dictator_wp',
                     title: '20 подтягиваний',
@@ -102,7 +154,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       },
       onBankNotificationAction: (notification) {
         if (mounted) {
-          
           _handleIncomingBankNotification(notification);
         }
       },
@@ -149,7 +200,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     if (!mounted) return;
 
     try {
-      final isGranted = await WidgetLaunchService.isNotificationListenerEnabled();
+      final isGranted =
+          await WidgetLaunchService.isNotificationListenerEnabled();
       if (!isGranted && mounted) {
         final prefs = await SharedPreferences.getInstance();
         final lastPrompt = prefs.getInt('arc_listener_last_prompt_ms') ?? 0;
@@ -163,7 +215,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         }
       }
     } catch (e) {
-      debugPrint('[MainNavigationScreen] Notification listener startup check non-fatal error: $e');
+      debugPrint(
+        '[MainNavigationScreen] Notification listener startup check non-fatal error: $e',
+      );
     }
   }
 
@@ -254,7 +308,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF00E5FF)),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 16,
+                    color: Color(0xFF00E5FF),
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -330,6 +388,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
   @override
   void dispose() {
+    _entranceController.dispose();
     _clipboardTimer?.cancel();
     _permissionTimer?.cancel();
     widget.controller.removeListener(_onControllerChanged);
@@ -365,7 +424,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       AppNotification(
         id: 'clip_${DateTime.now().millisecondsSinceEpoch}',
         type: NotificationType.hourlyExpense,
-        title: 'Добавить ${CurrencyFormatter.format(parsed.amount)} в ${parsed.categoryName}?',
+        title:
+            'Добавить ${CurrencyFormatter.format(parsed.amount)} в ${parsed.categoryName}?',
         body: '«${parsed.rawText}»',
         actionLabel: 'Добавить',
         onAction: () {
@@ -408,36 +468,67 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       return;
     }
 
+    final bool rawIsIncome =
+        raw['isIncome'] == true ||
+        raw['type'] == 'income' ||
+        fullText.toLowerCase().contains('пополнен') ||
+        fullText.toLowerCase().contains('зачислен') ||
+        fullText.toLowerCase().contains('вам перевели') ||
+        fullText.toLowerCase().contains('перевод от') ||
+        fullText.toLowerCase().contains('поступил') ||
+        fullText.toLowerCase().contains('зарплат') ||
+        fullText.startsWith('+');
+
     ParsedMBankNotification? parsed = MBankParserService.parse(fullText);
     if (parsed == null) {
       final fallbackAmount = (raw['amount'] as num?)?.toDouble() ?? 0.0;
       if (fallbackAmount > 0) {
         final targetId = raw['targetIdentifier'] as String? ?? 'UNKNOWN';
-        final isIncome = fullText.toLowerCase().contains('пополнен') ||
-            fullText.toLowerCase().contains('зачислен') ||
-            fullText.toLowerCase().contains('перевели');
         parsed = ParsedMBankNotification(
           amount: fallbackAmount,
-          type: isIncome ? TransactionType.income : TransactionType.expense,
-          title: targetId != 'UNKNOWN' ? targetId : (title.isNotEmpty ? title : 'MBank'),
-          categoryId: isIncome ? 'cat_other_income' : 'cat_other_expense',
+          type: rawIsIncome ? TransactionType.income : TransactionType.expense,
+          title: targetId != 'UNKNOWN'
+              ? targetId
+              : (title.isNotEmpty
+                    ? title
+                    : (rawIsIncome ? 'Пополнение' : 'MBank')),
+          categoryId: rawIsIncome ? 'cat_other_income' : 'cat_other_expense',
           rawText: fullText,
           timestamp: DateTime.now(),
         );
       } else {
         return;
       }
+    } else if (rawIsIncome && parsed.type != TransactionType.income) {
+      parsed = ParsedMBankNotification(
+        amount: parsed.amount,
+        type: TransactionType.income,
+        title: parsed.title,
+        categoryId: parsed.categoryId == 'cat_other'
+            ? 'cat_other_income'
+            : parsed.categoryId,
+        balanceAfter: parsed.balanceAfter,
+        cardLastDigits: parsed.cardLastDigits,
+        rawText: parsed.rawText,
+        timestamp: parsed.timestamp,
+        isSalary: parsed.isSalary,
+        isBalanceOnly: parsed.isBalanceOnly,
+      );
     }
 
     // Pure balance notification from bank: update account balance safely, NO expense created!
     if (parsed.isBalanceOnly) {
       if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
-        widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+        widget.controller.updateScrapedBankBalance(
+          'MBank',
+          parsed.balanceAfter!,
+        );
         _notificationController.showNotification(
           AppNotification(
             id: 'mbank_bal_${DateTime.now().millisecondsSinceEpoch}',
             type: NotificationType.mbankAutoSync,
-            title: 'Баланс MBank: ${CurrencyFormatter.format(parsed.balanceAfter!)}',
+            title:
+                'Баланс MBank: ${CurrencyFormatter.format(parsed.balanceAfter!)}',
             body: 'Баланс счета актуализирован из уведомления',
             actionLabel: 'Смотреть',
             onAction: () {
@@ -452,7 +543,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
     final status = raw['status'] as String? ?? 'CONFIRMED_PUSH';
     final source = raw['source'] as String? ?? 'notification';
-    final isScreen = source == 'accessibility_screen' || status == 'CONFIRMED_UI';
+    final isScreen =
+        source == 'accessibility_screen' || status == 'CONFIRMED_UI';
 
     if (status == 'VERIFIED_BY_PUSH') {
       _notificationController.showNotification(
@@ -460,7 +552,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
           id: 'mbank_verified_${DateTime.now().millisecondsSinceEpoch}',
           type: NotificationType.mbankAutoSync,
           title: 'Подтверждено пушем: ${parsed.title}',
-          body: '${CurrencyFormatter.format(parsed.amount)} • Сверено с экраном (без дублирования)',
+          body:
+              '${CurrencyFormatter.format(parsed.amount)} • Сверено с экраном (без дублирования)',
           actionLabel: 'К операциям',
           onAction: () {
             _notificationController.dismissActiveNotification();
@@ -489,7 +582,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         type: NotificationType.mbankAutoSync,
         title: isScreen
             ? 'Чек MBank: ${parsed.title}'
-            : (parsed.isSalary ? 'Зарплата зачислена!' : 'MBank: ${parsed.title}'),
+            : (parsed.isSalary
+                  ? 'Зарплата зачислена!'
+                  : 'MBank: ${parsed.title}'),
         body: '$amountText • Баланс автоматически обновлен',
         actionLabel: 'Смотреть',
         onAction: () {
@@ -507,7 +602,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
     if (shortcutKey.startsWith('debt_reminder:')) {
       final parts = shortcutKey.split(':');
-      final parsedAmount = parts.length > 1 ? (double.tryParse(parts[1]) ?? 200.0) : 200.0;
+      final parsedAmount = parts.length > 1
+          ? (double.tryParse(parts[1]) ?? 200.0)
+          : 200.0;
       final parsedPhrase = parts.length > 2 ? parts[2] : 'скинь 200 сом';
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -570,7 +667,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
           break;
         default:
           final match = widget.controller.quickShortcuts.firstWhere(
-            (s) => s.id == shortcutKey || s.title.toLowerCase().contains(shortcutKey),
+            (s) =>
+                s.id == shortcutKey ||
+                s.title.toLowerCase().contains(shortcutKey),
             orElse: () => widget.controller.quickShortcuts.isNotEmpty
                 ? widget.controller.quickShortcuts.first
                 : QuickPaymentShortcut(
@@ -650,40 +749,83 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
             }
 
             final source = item['source'] as String? ?? 'notification';
-            final isScreen = source == 'accessibility_screen' || status == 'CONFIRMED_UI';
+            final isScreen =
+                source == 'accessibility_screen' || status == 'CONFIRMED_UI';
 
-            ParsedMBankNotification? parsed = MBankParserService.parse(fullText);
+            final bool rawIsIncome =
+                item['isIncome'] == true ||
+                item['type'] == 'income' ||
+                fullText.toLowerCase().contains('пополнен') ||
+                fullText.toLowerCase().contains('зачислен') ||
+                fullText.toLowerCase().contains('вам перевели') ||
+                fullText.toLowerCase().contains('перевод от') ||
+                fullText.toLowerCase().contains('поступил') ||
+                fullText.toLowerCase().contains('зарплат') ||
+                fullText.startsWith('+');
+
+            ParsedMBankNotification? parsed = MBankParserService.parse(
+              fullText,
+            );
             if (parsed == null) {
-              final fallbackAmount = (item['amount'] as num?)?.toDouble() ?? 0.0;
+              final fallbackAmount =
+                  (item['amount'] as num?)?.toDouble() ?? 0.0;
               if (fallbackAmount > 0) {
-                final targetId = item['targetIdentifier'] as String? ?? 'UNKNOWN';
-                final isIncome = fullText.toLowerCase().contains('пополнен') ||
-                    fullText.toLowerCase().contains('зачислен') ||
-                    fullText.toLowerCase().contains('перевели');
+                final targetId =
+                    item['targetIdentifier'] as String? ?? 'UNKNOWN';
                 parsed = ParsedMBankNotification(
                   amount: fallbackAmount,
-                  type: isIncome ? TransactionType.income : TransactionType.expense,
-                  title: targetId != 'UNKNOWN' ? targetId : (title.isNotEmpty ? title : 'MBank'),
-                  categoryId: isIncome ? 'cat_other_income' : 'cat_other_expense',
+                  type: rawIsIncome
+                      ? TransactionType.income
+                      : TransactionType.expense,
+                  title: targetId != 'UNKNOWN'
+                      ? targetId
+                      : (title.isNotEmpty
+                            ? title
+                            : (rawIsIncome ? 'Пополнение' : 'MBank')),
+                  categoryId: rawIsIncome
+                      ? 'cat_other_income'
+                      : 'cat_other_expense',
                   rawText: fullText,
                   timestamp: DateTime.now(),
                 );
               }
+            } else if (rawIsIncome && parsed.type != TransactionType.income) {
+              parsed = ParsedMBankNotification(
+                amount: parsed.amount,
+                type: TransactionType.income,
+                title: parsed.title,
+                categoryId: parsed.categoryId == 'cat_other'
+                    ? 'cat_other_income'
+                    : parsed.categoryId,
+                balanceAfter: parsed.balanceAfter,
+                cardLastDigits: parsed.cardLastDigits,
+                rawText: parsed.rawText,
+                timestamp: parsed.timestamp,
+                isSalary: parsed.isSalary,
+                isBalanceOnly: parsed.isBalanceOnly,
+              );
             }
 
             if (parsed != null) {
               if (parsed.isBalanceOnly) {
                 if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
-                  widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+                  widget.controller.updateScrapedBankBalance(
+                    'MBank',
+                    parsed.balanceAfter!,
+                  );
                 }
                 continue;
               }
 
               // Deduplicate within the same pending batch (e.g. screen receipt + push notification for same purchase)
-              final batchSig = '${parsed.amount.toStringAsFixed(2)}_${parsed.type.name}';
+              final batchSig =
+                  '${parsed.amount.toStringAsFixed(2)}_${parsed.type.name}';
               if (batchSeenSignatures.contains(batchSig)) {
                 if (parsed.balanceAfter != null && parsed.balanceAfter! > 0) {
-                  widget.controller.updateScrapedBankBalance('MBank', parsed.balanceAfter!);
+                  widget.controller.updateScrapedBankBalance(
+                    'MBank',
+                    parsed.balanceAfter!,
+                  );
                 }
                 continue;
               }
@@ -694,7 +836,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                 amount: parsed.amount,
                 type: parsed.type,
                 categoryId: parsed.categoryId,
-                note: isScreen ? 'Чек с экрана MBank: $fullText' : 'MBank: $fullText',
+                note: isScreen
+                    ? 'Чек с экрана MBank: $fullText'
+                    : 'MBank: $fullText',
                 balanceAfter: parsed.balanceAfter,
               );
               importedCount++;
@@ -732,8 +876,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
         AppNotification(
           id: 'scraped_bal_${DateTime.now().millisecondsSinceEpoch}',
           type: NotificationType.mbankAutoSync,
-          title: 'Теневой скрапинг: $bank',
-          body: '${CurrencyFormatter.format(balance)} • Синхронизировано с экрана банка',
+          title: 'Баланс $bank обновлен',
+          body:
+              '${CurrencyFormatter.format(balance)} • Синхронизировано из приложения банка',
           actionLabel: 'Баланс',
           onAction: () {
             _notificationController.dismissActiveNotification();
@@ -759,16 +904,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
 
   List<Widget> _buildScreens() {
     return [
-      DashboardScreen(
-        controller: widget.controller,
-        onSeeAllTransactions: () => _switchTab(1),
-        notificationController: _notificationController,
+      _KeepAlivePage(
+        child: DashboardScreen(
+          controller: widget.controller,
+          onSeeAllTransactions: () => _switchTab(1),
+          notificationController: _notificationController,
+        ),
       ),
-      TransactionsScreen(controller: widget.controller),
-      AnalyticsScreen(controller: widget.controller),
-      ProfileScreen(
-        controller: widget.controller,
-        notificationController: _notificationController,
+      _KeepAlivePage(child: TransactionsScreen(controller: widget.controller)),
+      _KeepAlivePage(child: AnalyticsScreen(controller: widget.controller)),
+      _KeepAlivePage(
+        child: ProfileScreen(
+          controller: widget.controller,
+          notificationController: _notificationController,
+        ),
       ),
     ];
   }
@@ -776,20 +925,15 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   void _switchTab(int index) {
     if (_currentIndex != index) {
       HapticFeedback.selectionClick();
-      final previous = _currentIndex;
       setState(() {
         _currentIndex = index;
       });
       if (_pageController.hasClients) {
-        if ((index - previous).abs() > 1) {
-          _pageController.jumpToPage(index);
-        } else {
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-          );
-        }
+        _pageController.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
       }
     }
   }
@@ -806,20 +950,30 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.controller, _notificationController]),
+      listenable: Listenable.merge([
+        widget.controller,
+        _notificationController,
+      ]),
       builder: (context, _) {
         return GlassBackgroundScaffold(
           child: Stack(
             children: [
-              // Screen contents centered with responsive max width for Web & Desktop (Smooth PageView)
+              // Screen contents centered with responsive max width for Web & Desktop (Smooth Keep-Alive PageView with native swipe transitions)
               Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 580),
-                  child: PageView(
-                    controller: _pageController,
-                    physics: const BouncingScrollPhysics(),
-                    onPageChanged: _onPageChanged,
-                    children: _buildScreens(),
+                  child: RepaintBoundary(
+                    child: FadeTransition(
+                      opacity: _contentFadeAnimation,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        onPageChanged: _onPageChanged,
+                        children: _buildScreens(),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -834,119 +988,274 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 580),
                       child: IosPushBanner(
-                        notification: _notificationController.activeBannerNotification!,
-                        onDismiss: () => _notificationController.dismissActiveNotification(),
+                        notification:
+                            _notificationController.activeBannerNotification!,
+                        onDismiss: () =>
+                            _notificationController.dismissActiveNotification(),
                       ),
                     ),
                   ),
                 ),
 
-              // Floating Action Button (+) for instant Quick Add (warm Capybara Amber)
+              // Floating Action Button (+) for instant Quick Add (warm Capybara Amber with elastic spring)
               Positioned(
                 right: 20,
                 bottom: 96,
-                child: FloatingActionButton(
-                  heroTag: 'main_fab_add',
-                  onPressed: () {
-                    HapticFeedback.mediumImpact();
-                    AddTransactionModal.show(context, widget.controller);
-                  },
-                  backgroundColor: AppColors.capybaraAmber,
-                  elevation: 6,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.25),
-                      width: 1,
+                child: RepaintBoundary(
+                  child: ScaleTransition(
+                    scale: _fabScaleAnimation,
+                    child: FloatingActionButton(
+                      heroTag: 'main_fab_add',
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        AddTransactionModal.show(context, widget.controller);
+                      },
+                      backgroundColor: AppColors.capybaraAmber,
+                      elevation: 6,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.25),
+                          width: 1,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.add_rounded,
+                        color: Color(0xFF161412),
+                        size: 28,
+                      ),
                     ),
-                  ),
-                  child: const Icon(
-                    Icons.add_rounded,
-                    color: Color(0xFF161412),
-                    size: 28,
                   ),
                 ),
               ),
 
-              // Floating Liquid Glass Dock (Жидкое стекло: чистая органика, мягкий рефракционный блюр)
+              // Floating Liquid Glass Dock (Ультра-быстрый динамический выезд со скользящей янтарной линзой фокуса)
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 22,
+                bottom: 18,
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 480),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                      child: Container(
-                        height: 68,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(34),
-                          boxShadow: [
-                            // Глубокая рассеянная тень парения
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.45),
-                              blurRadius: 36,
-                              offset: const Offset(0, 14),
-                              spreadRadius: -4,
-                            ),
-                            // Нежный внутренний рефлекс стекла
-                            BoxShadow(
-                              color: Colors.white.withValues(alpha: 0.05),
-                              blurRadius: 18,
-                              offset: const Offset(0, -2),
-                              spreadRadius: 0,
-                            ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(34),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(34),
-                                // Эффект настоящего жидкого стекла (Liquid Glass)
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.white.withValues(alpha: 0.16),
-                                    const Color(0xFF1E2024).withValues(alpha: 0.45),
-                                    const Color(0xFF0F1013).withValues(alpha: 0.65),
-                                  ],
-                                  stops: const [0.0, 0.40, 1.0],
-                                ),
-                                border: Border.all(
-                                  width: 1.2,
-                                  color: Colors.white.withValues(alpha: 0.18),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: RepaintBoundary(
+                        child: AnimatedBuilder(
+                          animation: _entranceController,
+                          builder: (context, child) {
+                            return Transform.translate(
+                              offset: Offset(0, _dockSlideAnimation.value),
+                              child: Transform.scale(
+                                scale: _dockScaleAnimation.value,
+                                child: Opacity(
+                                  opacity: _dockFadeAnimation.value,
+                                  child: child,
                                 ),
                               ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  _buildNavItem(
-                                    index: 0,
-                                    icon: Icons.grid_view_rounded,
-                                    label: 'Обзор',
+                            );
+                          },
+                          child: Container(
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(36),
+                              boxShadow: [
+                                // 1. Глубокая рассеянная тень парения над контентом
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  blurRadius: 36,
+                                  offset: const Offset(0, 16),
+                                  spreadRadius: -4,
+                                ),
+                                // 2. Атмосферное янтарное свечение вокруг стекла
+                                BoxShadow(
+                                  color: AppColors.capybaraAmber.withValues(
+                                    alpha: 0.08,
                                   ),
-                                  _buildNavItem(
-                                    index: 1,
-                                    icon: Icons.receipt_long_rounded,
-                                    label: 'Операции',
+                                  blurRadius: 28,
+                                  offset: const Offset(0, 4),
+                                ),
+                                // 3. Зеркальный блик на верхнем ребре (Apple Specular Rim)
+                                BoxShadow(
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, -1),
+                                  spreadRadius: 0,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(36),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(
+                                  sigmaX: 32,
+                                  sigmaY: 32,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 4,
                                   ),
-                                  _buildNavItem(
-                                    index: 2,
-                                    icon: Icons.pie_chart_rounded,
-                                    label: 'Аналитика',
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(36),
+                                    // Ультра-реалистичное жидкое стекло (Liquid Glass с верхним световым бликом)
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.white.withValues(alpha: 0.25),
+                                        Colors.white.withValues(alpha: 0.08),
+                                        const Color(0xFF16181D).withValues(
+                                          alpha: 0.45,
+                                        ),
+                                        const Color(0xFF090A0D).withValues(
+                                          alpha: 0.70,
+                                        ),
+                                      ],
+                                      stops: const [0.0, 0.15, 0.50, 1.0],
+                                    ),
+                                    border: Border.all(
+                                      width: 1.1,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.22,
+                                      ),
+                                    ),
                                   ),
-                                  _buildNavItem(
-                                    index: 3,
-                                    icon: Icons.person_rounded,
-                                    label: 'Профиль',
+                                  child: AnimatedBuilder(
+                                    animation: _pageController,
+                                    builder: (context, _) {
+                                      double pageOffset =
+                                          _currentIndex.toDouble();
+                                      if (_pageController.hasClients &&
+                                          _pageController
+                                              .position
+                                              .haveDimensions) {
+                                        pageOffset =
+                                            _pageController.page ??
+                                            _currentIndex.toDouble();
+                                      }
+                                      final clampedPage = pageOffset.clamp(
+                                        0.0,
+                                        3.0,
+                                      );
+
+                                      return LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final totalWidth =
+                                              constraints.maxWidth;
+                                          final tabWidth = totalWidth / 4;
+                                          final lensWidth = tabWidth - 6;
+                                          final lensLeft =
+                                              (clampedPage * tabWidth) + 3;
+
+                                          return Stack(
+                                            alignment: Alignment.centerLeft,
+                                            children: [
+                                              // Скользящая янтарная линза жидкого стекла (синхронно движется за пальцем без задержки)
+                                              Positioned(
+                                                left: lensLeft,
+                                                top: 2,
+                                                bottom: 2,
+                                                width: lensWidth,
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          24,
+                                                        ),
+                                                    gradient: LinearGradient(
+                                                      begin:
+                                                          Alignment.topCenter,
+                                                      end: Alignment
+                                                          .bottomCenter,
+                                                      colors: [
+                                                        AppColors.capybaraAmber
+                                                            .withValues(
+                                                              alpha: 0.36,
+                                                            ),
+                                                        AppColors.capybaraAmber
+                                                            .withValues(
+                                                              alpha: 0.12,
+                                                            ),
+                                                      ],
+                                                    ),
+                                                    border: Border.all(
+                                                      color: AppColors
+                                                          .capybaraAmber
+                                                          .withValues(
+                                                            alpha: 0.70,
+                                                          ),
+                                                      width: 1.1,
+                                                    ),
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: AppColors
+                                                            .capybaraAmber
+                                                            .withValues(
+                                                              alpha: 0.40,
+                                                            ),
+                                                        blurRadius: 14,
+                                                        offset: const Offset(
+                                                          0,
+                                                          2,
+                                                        ),
+                                                        spreadRadius: -1,
+                                                      ),
+                                                      BoxShadow(
+                                                        color: AppColors
+                                                            .capybaraAmber
+                                                            .withValues(
+                                                              alpha: 0.16,
+                                                            ),
+                                                        blurRadius: 20,
+                                                        offset: const Offset(
+                                                          0,
+                                                          0,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+
+                                              // 4 Интерактивные вкладки навигации
+                                              Row(
+                                                children: [
+                                                  _buildNavItem(
+                                                    index: 0,
+                                                    icon:
+                                                        Icons.grid_view_rounded,
+                                                    label: 'Обзор',
+                                                    pageOffset: clampedPage,
+                                                  ),
+                                                  _buildNavItem(
+                                                    index: 1,
+                                                    icon: Icons
+                                                        .receipt_long_rounded,
+                                                    label: 'Операции',
+                                                    pageOffset: clampedPage,
+                                                  ),
+                                                  _buildNavItem(
+                                                    index: 2,
+                                                    icon: Icons
+                                                        .pie_chart_rounded,
+                                                    label: 'Аналитика',
+                                                    pageOffset: clampedPage,
+                                                  ),
+                                                  _buildNavItem(
+                                                    index: 3,
+                                                    icon: Icons.person_rounded,
+                                                    label: 'Профиль',
+                                                    pageOffset: clampedPage,
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    },
                                   ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
@@ -967,73 +1276,87 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     required int index,
     required IconData icon,
     required String label,
+    required double pageOffset,
   }) {
-    final isSelected = _currentIndex == index;
+    final distance = (pageOffset - index).abs();
+    final activeProgress = (1.0 - distance).clamp(0.0, 1.0);
+
+    final iconColor = Color.lerp(
+      Colors.white.withValues(alpha: 0.42),
+      AppColors.capybaraAmber,
+      activeProgress,
+    )!;
+
+    final scale = 1.0 + (0.07 * activeProgress);
+
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _switchTab(index),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            // Стеклянная капля-индикатор под выбранным табом
-            gradient: isSelected
-                ? LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.white.withValues(alpha: 0.18),
-                      Colors.white.withValues(alpha: 0.06),
-                    ],
-                  )
-                : null,
-            borderRadius: BorderRadius.circular(24),
-            border: isSelected
-                ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.22),
-                    width: 0.9,
-                  )
-                : Border.all(
-                    color: Colors.transparent,
-                    width: 0.9,
-                  ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedScale(
-                scale: isSelected ? 1.08 : 1.0,
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                child: Icon(
-                  icon,
-                  size: 21,
-                  color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.40),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Transform.scale(
+                  scale: scale,
+                  child: Icon(icon, size: 20, color: iconColor),
                 ),
-              ),
-              const SizedBox(height: 3),
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 200),
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                  color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.40),
-                  letterSpacing: -0.1,
-                ),
-                child: Text(
+                const SizedBox(height: 2),
+                Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: activeProgress > 0.5
+                        ? FontWeight.w800
+                        : FontWeight.w500,
+                    color: iconColor,
+                    letterSpacing: -0.1,
+                    shadows: activeProgress > 0.3
+                        ? [
+                            Shadow(
+                              color: AppColors.capybaraAmber.withValues(
+                                alpha: 0.65 * activeProgress,
+                              ),
+                              blurRadius: 8 * activeProgress,
+                            ),
+                          ]
+                        : null,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+}
+
+/// Lightweight keep-alive wrapper for root navigation tabs
+/// Prevents tab disposal & frame drops during tab transitions
+class _KeepAlivePage extends StatefulWidget {
+  final Widget child;
+  const _KeepAlivePage({required this.child});
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

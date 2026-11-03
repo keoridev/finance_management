@@ -698,7 +698,8 @@ class MainActivity : FlutterActivity() {
         bankReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    MBankNotificationListenerService.ACTION_BANK_NOTIFICATION_RECEIVED -> {
+                    MBankNotificationListenerService.ACTION_BANK_NOTIFICATION_RECEIVED,
+                    TransactionDeduplicationManager.ACTION_TRANSACTION_EVENT -> {
                         val title = intent.getStringExtra("title") ?: ""
                         val body = intent.getStringExtra("body") ?: ""
                         val source = intent.getStringExtra("source") ?: "notification"
@@ -707,6 +708,8 @@ class MainActivity : FlutterActivity() {
                         val currency = intent.getStringExtra("currency") ?: "KGS"
                         val targetIdentifier = intent.getStringExtra("targetIdentifier") ?: "UNKNOWN"
                         val timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis())
+                        val isIncome = intent.getBooleanExtra("isIncome", false)
+                        val type = intent.getStringExtra("type") ?: if (isIncome) "income" else "expense"
                         val payload = mapOf(
                             "title" to title,
                             "body" to body,
@@ -716,7 +719,9 @@ class MainActivity : FlutterActivity() {
                             "status" to status,
                             "amount" to amount,
                             "currency" to currency,
-                            "targetIdentifier" to targetIdentifier
+                            "targetIdentifier" to targetIdentifier,
+                            "isIncome" to isIncome,
+                            "type" to type
                         )
                         methodChannel?.invokeMethod("onBankNotificationReceived", payload)
                     }
@@ -740,6 +745,8 @@ class MainActivity : FlutterActivity() {
                         val currency = intent.getStringExtra("currency") ?: "KGS"
                         val targetIdentifier = intent.getStringExtra("targetIdentifier") ?: "UNKNOWN"
                         val timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis())
+                        val isIncome = intent.getBooleanExtra("isIncome", false)
+                        val type = intent.getStringExtra("type") ?: if (isIncome) "income" else "expense"
                         val payload = mapOf(
                             "title" to title,
                             "body" to body,
@@ -749,7 +756,9 @@ class MainActivity : FlutterActivity() {
                             "status" to status,
                             "amount" to amount,
                             "currency" to currency,
-                            "targetIdentifier" to targetIdentifier
+                            "targetIdentifier" to targetIdentifier,
+                            "isIncome" to isIncome,
+                            "type" to type
                         )
                         methodChannel?.invokeMethod("onBankNotificationReceived", payload)
                     }

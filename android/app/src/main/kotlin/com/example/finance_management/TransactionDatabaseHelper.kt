@@ -158,6 +158,10 @@ class TransactionDatabaseHelper(context: Context) : SQLiteOpenHelper(
                         targetIdentifier.contains(existingTarget, ignoreCase = true)
 
                 if (isCompatible) {
+                    val rawTitle = c.getString(c.getColumnIndexOrThrow(COLUMN_TITLE)) ?: ""
+                    val rawBody = c.getString(c.getColumnIndexOrThrow(COLUMN_RAW_TEXT)) ?: ""
+                    val isIncome = BankPatternConfig.isIncomeTransaction("$rawTitle $rawBody")
+
                     return StoredTransaction(
                         id = c.getLong(c.getColumnIndexOrThrow(COLUMN_ID)),
                         fingerprint = c.getString(c.getColumnIndexOrThrow(COLUMN_FINGERPRINT)),
@@ -168,9 +172,10 @@ class TransactionDatabaseHelper(context: Context) : SQLiteOpenHelper(
                         status = c.getString(c.getColumnIndexOrThrow(COLUMN_STATUS)),
                         isVerified = c.getInt(c.getColumnIndexOrThrow(COLUMN_IS_VERIFIED)) == 1,
                         targetIdentifier = existingTarget,
-                        title = c.getString(c.getColumnIndexOrThrow(COLUMN_TITLE)) ?: "",
-                        rawText = c.getString(c.getColumnIndexOrThrow(COLUMN_RAW_TEXT)) ?: "",
-                        createdAt = c.getLong(c.getColumnIndexOrThrow(COLUMN_CREATED_AT))
+                        title = rawTitle,
+                        rawText = rawBody,
+                        createdAt = c.getLong(c.getColumnIndexOrThrow(COLUMN_CREATED_AT)),
+                        isIncome = isIncome
                     )
                 }
             }
@@ -191,5 +196,6 @@ data class StoredTransaction(
     val targetIdentifier: String,
     val title: String,
     val rawText: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val isIncome: Boolean = false
 )

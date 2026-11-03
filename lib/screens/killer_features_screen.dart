@@ -244,6 +244,23 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
               activeTrackColor: AppColors.capybaraAmber,
               activeThumbColor: const Color(0xFF09090B),
               onChanged: (val) async {
+                if (val) {
+                  final isAccess =
+                      await WidgetLaunchService.isAccessibilityServiceEnabled();
+                  final canOverlay =
+                      await WidgetLaunchService.canDrawOverlays();
+
+                  if (!isAccess || !canOverlay) {
+                    if (context.mounted) {
+                      _showBlockerPermissionsDialog(
+                        context,
+                        needAccessibility: !isAccess,
+                        needOverlay: !canOverlay,
+                      );
+                    }
+                  }
+                }
+
                 try {
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool('arc_social_blocker_enabled', val);
@@ -581,6 +598,192 @@ class _KillerFeaturesScreenState extends State<KillerFeaturesScreen> {
           Text(
             label,
             style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBlockerPermissionsDialog(
+    BuildContext context, {
+    required bool needAccessibility,
+    required bool needOverlay,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141418),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.capybaraAmber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: AppColors.capybaraAmber,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Разрешения для Блокатора',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Чтобы Капибара-Диктатор могла распознавать запуск Instagram / TikTok и показывать экран блокировки, включите системные разрешения:',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.7),
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (needAccessibility) ...[
+              _buildPermissionStep(
+                icon: Icons.accessibility_new_rounded,
+                title: '1. Спец. возможности (Accessibility)',
+                subtitle: 'Распознавание запуска соцсетей в фоне',
+                btnText: 'Включить в настройках',
+                onTap: () {
+                  WidgetLaunchService.openAccessibilitySettings();
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (needOverlay) ...[
+              _buildPermissionStep(
+                icon: Icons.layers_rounded,
+                title: '2. Поверх других приложений (Overlay)',
+                subtitle: 'Отображение экрана блокировки Капибары',
+                btnText: 'Разрешить поверх окон',
+                onTap: () {
+                  WidgetLaunchService.requestOverlayPermission();
+                },
+              ),
+              const SizedBox(height: 14),
+            ],
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.capybaraAmber,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text(
+                  'Понятно, всё настроено',
+                  style: TextStyle(
+                    color: Color(0xFF09090B),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPermissionStep({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String btnText,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.capybaraAmber),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: Colors.white.withValues(alpha: 0.55),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: onTap,
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(
+                color: AppColors.capybaraAmber.withValues(alpha: 0.5),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            ),
+            child: Text(
+              btnText,
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.capybaraAmber,
+              ),
+            ),
           ),
         ],
       ),

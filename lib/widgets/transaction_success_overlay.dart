@@ -64,25 +64,27 @@ class _CelebrationBannerState extends State<_CelebrationBanner>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
-      reverseDuration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 320),
+      reverseDuration: const Duration(milliseconds: 260),
     );
 
-    _slideAnimation = Tween<double>(begin: -60, end: 0).animate(
+    _slideAnimation = Tween<double>(begin: -50, end: 0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
     );
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
-    _scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+    _scaleAnimation = Tween<double>(begin: 0.88, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
     );
 
     _controller.forward();
 
-    // Auto dismiss after 2.2 seconds
-    Future.delayed(const Duration(milliseconds: 2200), () {
+    // Auto dismiss after 2.0 seconds
+    Future.delayed(const Duration(milliseconds: 2000), () {
       if (mounted) {
         _controller.reverse().then((_) {
-          widget.onDismiss();
+          if (mounted) {
+            widget.onDismiss();
+          }
         });
       }
     });
@@ -97,103 +99,133 @@ class _CelebrationBannerState extends State<_CelebrationBanner>
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
+    final accentColor =
+        widget.isIncome ? AppColors.income : AppColors.capybaraAmber;
 
     return Positioned(
       top: topPadding + 10,
       left: 16,
       right: 16,
-      child: Material(
-        color: Colors.transparent,
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Transform.translate(
-              offset: Offset(0, _slideAnimation.value),
-              child: Opacity(
-                opacity: _fadeAnimation.value,
-                child: Transform.scale(
-                  scale: _scaleAnimation.value,
-                  child: child,
-                ),
-              ),
-            );
-          },
-          child: GlassContainer(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            borderRadius: BorderRadius.circular(22),
-            surfaceColor: const Color(0xFF1C1C1E).withValues(alpha: 0.95),
-            borderColor: Colors.white.withValues(alpha: 0.18),
-            borderWidth: 0.8,
-            shadows: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
-            child: Row(
-              children: [
-                // Animated Success Check / Coin
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: (widget.isIncome ? AppColors.income : AppColors.iosBlue)
-                        .withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
+      child: RepaintBoundary(
+        child: Material(
+          color: Colors.transparent,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              return Transform.translate(
+                offset: Offset(0, _slideAnimation.value),
+                child: Opacity(
+                  opacity: _fadeAnimation.value,
+                  child: Transform.scale(
+                    scale: _scaleAnimation.value,
+                    child: child,
                   ),
-                  child: Center(
-                    child: Icon(
-                      widget.isIncome ? Icons.arrow_downward_rounded : Icons.check_rounded,
-                      color: widget.isIncome ? AppColors.income : Colors.white,
-                      size: 20,
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                gradient: const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xF524272D),
+                    Color(0xFA14161A),
+                  ],
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  width: 1.0,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                    spreadRadius: -2,
+                  ),
+                  BoxShadow(
+                    color: accentColor.withValues(alpha: 0.12),
+                    blurRadius: 20,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  // Animated Success Check / Coin
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.22),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: accentColor.withValues(alpha: 0.45),
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        widget.isIncome
+                            ? Icons.arrow_downward_rounded
+                            : Icons.check_rounded,
+                        color: accentColor,
+                        size: 20,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
+                  const SizedBox(width: 12),
 
-                // Details
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          letterSpacing: -0.2,
+                  // Details
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            letterSpacing: -0.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.bankName != null
-                            ? 'Списано • ${widget.bankName}'
-                            : (widget.isIncome ? 'Пополнение баланса' : 'Расход учтен'),
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.bankName != null
+                              ? (widget.isIncome
+                                  ? 'Пополнение • ${widget.bankName}'
+                                  : 'Списано • ${widget.bankName}')
+                              : (widget.isIncome
+                                  ? 'Пополнение баланса'
+                                  : 'Быстрый расход учтен'),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textSecondary,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-                // Amount
-                Text(
-                  CurrencyFormatter.format(widget.amount, showSign: true),
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
-                    color: widget.isIncome ? AppColors.income : Colors.white,
+                  // Amount
+                  Text(
+                    CurrencyFormatter.format(widget.amount, showSign: true),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                      color: accentColor,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

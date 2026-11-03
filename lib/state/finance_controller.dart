@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/account.dart';
@@ -1568,14 +1569,7 @@ class FinanceController extends ChangeNotifier {
     }
     if (idx == -1) return false;
 
-    final currentBal = _accounts[idx].balance;
-    // Safety guard: If current balance > 1000 and new balance drops by more than 90% without a transaction,
-    // reject it as a spurious scraped value (e.g. cashback or button label).
-    if (currentBal > 1000 && newBalance < (currentBal * 0.1)) {
-      debugPrint('[FinanceController] Rejected suspicious scraped balance: $newBalance (current: $currentBal)');
-      return false;
-    }
-
+    // Update account balance directly with authoritative balance from bank screen
     _accounts[idx] = _accounts[idx].copyWith(balance: newBalance);
     _saveToStorage();
     WidgetLaunchService.syncBalanceToWidget(
@@ -1594,63 +1588,87 @@ class FinanceController extends ChangeNotifier {
     _saveToStorage();
   }
 
-  void _saveToStorage() {
+  Timer? _saveDebounceTimer;
+
+  void _saveToStorage({bool immediate = false}) {
     if (!_isStorageLoaded) {
       debugPrint('[FinanceController] Skipping saveToStorage: storage not loaded yet');
       return;
     }
-    StorageService.saveAll(
-      accounts: _accounts,
-      transactions: _transactions,
-      archivedTransactions: _archivedTransactions,
-      categories: _categories,
-      budgets: _budgets,
-      savingsGoals: _savingsGoals,
-      recurringPayments: _recurringPayments,
-      shortcuts: _quickShortcuts,
-      noSpendStreak: _noSpendStreak,
-      lastWinterCheckInDate: _lastWinterCheckInDate,
-      winterShields: _winterShields,
-    );
-    WidgetLaunchService.syncBalanceToWidget(
-      totalBalance,
-      streak: noSpendStreak,
-      isWinterChecked: isWinterCheckedToday,
-      accountName: activeAccountLabel,
-      todaySpent: todaySpentLabel,
-      quickButtons: quickButtonsForWidget,
-    );
 
-    // Sync active dream goal & threshold to Android Capybara Pre-Transaction filter
-    final dreamGoal = _savingsGoals.isNotEmpty ? _savingsGoals.first.title : 'MacBook Pro M3';
-    final remaining = _savingsGoals.isNotEmpty
-        ? (_savingsGoals.first.targetAmount - _savingsGoals.first.currentAmount).clamp(0.0, 99999999.0)
-        : 120000.0;
-    WidgetLaunchService.syncCapybaraFilterConfig(
-      enabled: _capybaraFilterEnabled,
-      threshold: 500.0,
-      dreamGoal: dreamGoal,
-      remainingGoal: remaining,
-    );
-    WidgetLaunchService.syncFloatingCapyConfig(
-      enabled: _floatingCapyEnabled,
-    );
+    void executeSave() {
+      try {
+        StorageService.saveAll(
+          accounts: _accounts,
+          transactions: _transactions,
+          archivedTransactions: _archivedTransactions,
+          categories: _categories,
+          budgets: _budgets,
+          savingsGoals: _savingsGoals,
+          recurringPayments: _recurringPayments,
+          shortcuts: _quickShortcuts,
+          noSpendStreak: _noSpendStreak,
+          lastWinterCheckInDate: _lastWinterCheckInDate,
+          winterShields: _winterShields,
+        );
+        WidgetLaunchService.syncBalanceToWidget(
+          totalBalance,
+          streak: noSpendStreak,
+          isWinterChecked: isWinterCheckedToday,
+          accountName: activeAccountLabel,
+          todaySpent: todaySpentLabel,
+          quickButtons: quickButtonsForWidget,
+        );
 
-    final hasActivePenalty = _activeWorkoutPenalty != null && !_activeWorkoutPenalty!.isCompleted;
-    WidgetLaunchService.syncSocialBlockerConfig(
-      enabled: true,
-      isBlocked: hasActivePenalty,
-      dreamGoal: dreamGoal,
-      pullupsRequired: 20,
-    );
+        // Sync active dream goal & threshold to Android Capybara Pre-Transaction filter
+        final dreamGoal = _savingsGoals.isNotEmpty ? _savingsGoals.first.title : 'MacBook Pro M3';
+        final remaining = _savingsGoals.isNotEmpty
+            ? (_savingsGoals.first.targetAmount - _savingsGoals.first.currentAmount).clamp(0.0, 99999999.0)
+            : 120000.0;
+        WidgetLaunchService.syncCapybaraFilterConfig(
+          enabled: _capybaraFilterEnabled,
+          threshold: 500.0,
+          dreamGoal: dreamGoal,
+          remainingGoal: remaining,
+        );
+        WidgetLaunchService.syncFloatingCapyConfig(
+          enabled: _floatingCapyEnabled,
+        );
 
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setBool('arc_smart_round_up_enabled', _smartRoundUpEnabled);
-      prefs.setBool('rounding_enabled', _smartRoundUpEnabled);
-      prefs.setInt('arc_smart_round_up_step', _smartRoundUpStep);
-      prefs.setBool('arc_capybara_filter_enabled', _capybaraFilterEnabled);
-      prefs.setBool('arc_floating_capy_enabled', _floatingCapyEnabled);
-      prefs.setBool('arc_capybara_widget_enabled', _capybaraWidgetEnabled);
-    }).catchError((_) {});
+        final hasActivePenalty = _activeWorkoutPenalty != null && !_activeWorkoutPenalty!.isCompleted;
+        WidgetLaunchService.syncSocialBlockerConfig(
+          enabled: true,
+          isBlocked: hasActivePenalty,
+          dreamGoal: dreamGoal,
+          pullupsRequired: 20,
+        );
+
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setBool('arc_smart_round_up_enabled', _smartRoundUpEnabled);
+          prefs.setBool('rounding_enabled', _smartRoundUpEnabled);
+          prefs.setInt('arc_smart_round_up_step', _smartRoundUpStep);
+          prefs.setBool('arc_capybara_filter_enabled', _capybaraFilterEnabled);
+          prefs.setBool('arc_floating_capy_enabled', _floatingCapyEnabled);
+          prefs.setBool('arc_capybara_widget_enabled', _capybaraWidgetEnabled);
+        }).catchError((_) {});
+      } catch (e) {
+        debugPrint('[FinanceController] Error saving to storage: $e');
+      }
+    }
+
+    if (immediate) {
+      _saveDebounceTimer?.cancel();
+      executeSave();
+    } else {
+      _saveDebounceTimer?.cancel();
+      // 90ms micro-debounce frees the current UI animation frame completely!
+      _saveDebounceTimer = Timer(const Duration(milliseconds: 90), executeSave);
+    }
+  }
+
+  @override
+  void dispose() {
+    _saveDebounceTimer?.cancel();
+    super.dispose();
   }
 }

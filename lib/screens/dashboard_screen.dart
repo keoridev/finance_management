@@ -19,7 +19,7 @@ import 'receipt_scanner_screen.dart';
 import 'recurring_payments_screen.dart';
 import 'settings_screen.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   final FinanceController controller;
   final VoidCallback onSeeAllTransactions;
   final NotificationController? notificationController;
@@ -30,6 +30,55 @@ class DashboardScreen extends StatelessWidget {
     required this.onSeeAllTransactions,
     this.notificationController,
   });
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _cascadeController;
+  late final Animation<double> _balanceAnimation;
+  late final Animation<double> _shortcutsAnimation;
+  late final Animation<double> _accountsAnimation;
+  late final Animation<double> _recentAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _cascadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+
+    _balanceAnimation = CurvedAnimation(
+      parent: _cascadeController,
+      curve: const Interval(0.0, 0.55, curve: Curves.easeOutCubic),
+    );
+
+    _shortcutsAnimation = CurvedAnimation(
+      parent: _cascadeController,
+      curve: const Interval(0.12, 0.70, curve: Curves.easeOutCubic),
+    );
+
+    _accountsAnimation = CurvedAnimation(
+      parent: _cascadeController,
+      curve: const Interval(0.22, 0.82, curve: Curves.easeOutCubic),
+    );
+
+    _recentAnimation = CurvedAnimation(
+      parent: _cascadeController,
+      curve: const Interval(0.32, 1.0, curve: Curves.easeOutCubic),
+    );
+
+    _cascadeController.forward();
+  }
+
+  @override
+  void dispose() {
+    _cascadeController.dispose();
+    super.dispose();
+  }
 
   String _getMonthName(int month) {
     const months = [
@@ -53,9 +102,9 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final monthName = '${_getMonthName(now.month)} ${now.year}';
-    final recentTransactions = controller.transactions.take(5).toList();
+    final recentTransactions = widget.controller.transactions.take(5).toList();
 
-    if (controller.isLoading) {
+    if (widget.controller.isLoading) {
       return Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
@@ -153,7 +202,7 @@ class DashboardScreen extends StatelessWidget {
               Navigator.of(context).push(
                 CupertinoPageRoute(
                   builder: (_) =>
-                      RecurringPaymentsScreen(controller: controller),
+                      RecurringPaymentsScreen(controller: widget.controller),
                 ),
               );
             },
@@ -171,7 +220,7 @@ class DashboardScreen extends StatelessWidget {
               HapticFeedback.lightImpact();
               Navigator.of(context).push(
                 CupertinoPageRoute(
-                  builder: (_) => ReceiptScannerScreen(controller: controller),
+                  builder: (_) => ReceiptScannerScreen(controller: widget.controller),
                 ),
               );
             },
@@ -190,8 +239,8 @@ class DashboardScreen extends StatelessWidget {
               Navigator.of(context).push(
                 CupertinoPageRoute(
                   builder: (_) => KillerFeaturesScreen(
-                    controller: controller,
-                    notificationController: notificationController,
+                    controller: widget.controller,
+                    notificationController: widget.notificationController,
                   ),
                 ),
               );
@@ -207,8 +256,8 @@ class DashboardScreen extends StatelessWidget {
               Navigator.of(context).push(
                 CupertinoPageRoute(
                   builder: (_) => SettingsScreen(
-                    controller: controller,
-                    notificationController: notificationController,
+                    controller: widget.controller,
+                    notificationController: widget.notificationController,
                   ),
                 ),
               );
@@ -222,290 +271,352 @@ class DashboardScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF1C1C1E),
         onRefresh: () async {
           HapticFeedback.lightImpact();
-          await controller.simulateLoading();
+          await widget.controller.simulateLoading();
         },
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           children: [
-            // 1. Главный верхний блок: Общий баланс
-            BalanceCard(
-              title: controller.activeAccountLabel,
-              totalBalance: controller.activeBalance,
-              periodIncome: controller.periodIncome,
-              periodExpense: controller.periodExpense,
-              periodLabel: controller.selectedAccountId != null
-                  ? '${controller.activeAccountLabel} • ${controller.selectedPeriod.label}'
-                  : controller.selectedPeriod.label,
+            // 1. Главный верхний блок: Общий баланс (Каскадное появление)
+            AnimatedBuilder(
+              animation: _balanceAnimation,
+              builder: (context, child) {
+                final v = _balanceAnimation.value;
+                return Transform.translate(
+                  offset: Offset(0, (1.0 - v) * 20),
+                  child: Opacity(
+                    opacity: v.clamp(0.0, 1.0),
+                    child: child,
+                  ),
+                );
+              },
+              child: BalanceCard(
+                title: widget.controller.activeAccountLabel,
+                totalBalance: widget.controller.activeBalance,
+                periodIncome: widget.controller.periodIncome,
+                periodExpense: widget.controller.periodExpense,
+                periodLabel: widget.controller.selectedAccountId != null
+                    ? '${widget.controller.activeAccountLabel} • ${widget.controller.selectedPeriod.label}'
+                    : widget.controller.selectedPeriod.label,
+              ),
             ),
             const SizedBox(height: 16),
 
-            // 2. Быстрые платежи в 1 тап (Маршрутка, Кофе, Обед...)
-            QuickShortcutsSection(controller: controller),
+            // 2. Быстрые платежи в 1 тап (Маршрутка, Кофе, Обед...) (Плавный взлет)
+            AnimatedBuilder(
+              animation: _shortcutsAnimation,
+              builder: (context, child) {
+                final v = _shortcutsAnimation.value;
+                return Transform.translate(
+                  offset: Offset(0, (1.0 - v) * 18),
+                  child: Opacity(
+                    opacity: v.clamp(0.0, 1.0),
+                    child: child,
+                  ),
+                );
+              },
+              child: QuickShortcutsSection(controller: widget.controller),
+            ),
             const SizedBox(height: 18),
 
-            // 3. Счета и Банки
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Мои банки и счета',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+            // 3. Счета и Банки (Синхронный каскадный слайд)
+            AnimatedBuilder(
+              animation: _accountsAnimation,
+              builder: (context, child) {
+                final v = _accountsAnimation.value;
+                return Transform.translate(
+                  offset: Offset(0, (1.0 - v) * 16),
+                  child: Opacity(
+                    opacity: v.clamp(0.0, 1.0),
+                    child: child,
                   ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    InkWell(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        Navigator.of(context).push(
-                          CupertinoPageRoute(
-                            builder: (_) => MBankSyncScreen(controller: controller),
+                );
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Мои банки и счета',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: -0.3,
                           ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00C7BE).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: const Color(0xFF00C7BE).withValues(alpha: 0.4),
-                          ),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.sync_rounded,
-                              size: 13,
-                              color: Color(0xFF00C7BE),
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              'MBank Авто',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF00C7BE),
-                              ),
-                            ),
-                          ],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    InkWell(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        AddBankAccountModal.show(context, controller);
-                      },
-                      child: Row(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.add_rounded,
-                            size: 14,
-                            color: Colors.white.withValues(alpha: 0.8),
+                          InkWell(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              Navigator.of(context).push(
+                                CupertinoPageRoute(
+                                  builder: (_) => MBankSyncScreen(controller: widget.controller),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00C7BE).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFF00C7BE).withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.sync_rounded,
+                                    size: 13,
+                                    color: Color(0xFF00C7BE),
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'MBank Авто',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF00C7BE),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                          const SizedBox(width: 3),
-                          Text(
-                            'Добавить',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white.withValues(alpha: 0.8),
+                          const SizedBox(width: 10),
+                          InkWell(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              AddBankAccountModal.show(context, widget.controller);
+                            },
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.add_rounded,
+                                  size: 14,
+                                  color: Colors.white.withValues(alpha: 0.8),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'Добавить',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 120,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: controller.accounts.length + 1,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  if (index == controller.accounts.length) {
-                    return InkWell(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        AddBankAccountModal.show(context, controller);
-                      },
-                      borderRadius: BorderRadius.circular(18),
-                      child: Container(
-                        width: 110,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.04),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.08),
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_card_rounded,
-                              color: Colors.white.withValues(alpha: 0.8),
-                              size: 24,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Свой банк',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white.withValues(alpha: 0.8),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 120,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.controller.accounts.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        if (index == widget.controller.accounts.length) {
+                          return InkWell(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              AddBankAccountModal.show(context, widget.controller);
+                            },
+                            borderRadius: BorderRadius.circular(18),
+                            child: Container(
+                              width: 110,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.add_card_rounded,
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                    size: 24,
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Свой банк',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white.withValues(alpha: 0.8),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
+                          );
+                        }
 
-                  final account = controller.accounts[index];
-                  final isSelected = controller.selectedAccountId == account.id;
-                  return AccountCard(
-                    account: account,
-                    isSelected: isSelected,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      if (isSelected) {
-                        controller.setSelectedAccount(null);
-                      } else {
-                        controller.setSelectedAccount(account.id);
-                      }
-                    },
-                  );
-                },
+                        final account = widget.controller.accounts[index];
+                        final isSelected = widget.controller.selectedAccountId == account.id;
+                        return AccountCard(
+                          account: account,
+                          isSelected: isSelected,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            if (isSelected) {
+                              widget.controller.setSelectedAccount(null);
+                            } else {
+                              widget.controller.setSelectedAccount(account.id);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
 
-            // 5. Последние операции
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Последние операции',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onSeeAllTransactions();
-                  },
-                  child: Text(
-                    'Все операции',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.8),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            if (recentTransactions.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: EmptyStateView(
-                  icon: Icons.receipt_long_rounded,
-                  title: 'Пока нет операций',
-                  subtitle:
-                      'Нажмите кнопку «+» внизу, чтобы добавить первую транзакцию',
-                ),
-              )
-            else
-              ...recentTransactions.map((tx) {
-                final category = controller.getCategoryById(tx.categoryId);
-                final account = controller.getAccountById(tx.accountId);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: TransactionTile(
-                    transaction: tx,
-                    category: category,
-                    account: account,
-                    onDelete: () {
-                      final deletedTx = tx;
-                      controller.deleteTransaction(tx.id);
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          backgroundColor: const Color(0xFF1C1C1E),
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
-                          ),
-                          content: Row(
-                            children: [
-                              const Icon(Icons.archive_outlined, color: Color(0xFFFF9F0A), size: 20),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  '«${deletedTx.title}» в архиве',
-                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          action: SnackBarAction(
-                            label: 'ВЕРНУТЬ',
-                            textColor: const Color(0xFFFF9F0A),
-                            onPressed: () {
-                              HapticFeedback.mediumImpact();
-                              controller.restoreTransaction(deletedTx.id);
-                            },
-                          ),
-                          duration: const Duration(seconds: 4),
-                        ),
-                      );
-                    },
-                    onDuplicate: () {
-                      controller.duplicateTransaction(tx);
-                      TransactionSuccessOverlay.show(
-                        context,
-                        title: 'Операция повторена',
-                        amount: tx.amount,
-                        bankName: account?.bankName ?? '',
-                        isIncome: tx.type == TransactionType.income,
-                      );
-                    },
+            // 5. Последние операции (Смягчённый восходящий каскад)
+            AnimatedBuilder(
+              animation: _recentAnimation,
+              builder: (context, child) {
+                final v = _recentAnimation.value;
+                return Transform.translate(
+                  offset: Offset(0, (1.0 - v) * 14),
+                  child: Opacity(
+                    opacity: v.clamp(0.0, 1.0),
+                    child: child,
                   ),
                 );
-              }),
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Последние операции',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: -0.3,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          widget.onSeeAllTransactions();
+                        },
+                        child: Text(
+                          'Все операции',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (recentTransactions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: EmptyStateView(
+                        icon: Icons.receipt_long_rounded,
+                        title: 'Пока нет операций',
+                        subtitle:
+                            'Нажмите кнопку «+» внизу, чтобы добавить первую транзакцию',
+                      ),
+                    )
+                  else
+                    ...recentTransactions.map((tx) {
+                      final category = widget.controller.getCategoryById(tx.categoryId);
+                      final account = widget.controller.getAccountById(tx.accountId);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: TransactionTile(
+                          transaction: tx,
+                          category: category,
+                          account: account,
+                          onDelete: () {
+                            final deletedTx = tx;
+                            widget.controller.deleteTransaction(tx.id);
+                            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                backgroundColor: const Color(0xFF1C1C1E),
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                                ),
+                                content: Row(
+                                  children: [
+                                    const Icon(Icons.archive_outlined, color: Color(0xFFFF9F0A), size: 20),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        '«${deletedTx.title}» в архиве',
+                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                action: SnackBarAction(
+                                  label: 'ВЕРНУТЬ',
+                                  textColor: const Color(0xFFFF9F0A),
+                                  onPressed: () {
+                                    HapticFeedback.mediumImpact();
+                                    widget.controller.restoreTransaction(deletedTx.id);
+                                  },
+                                ),
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          },
+                          onDuplicate: () {
+                            widget.controller.duplicateTransaction(tx);
+                            TransactionSuccessOverlay.show(
+                              context,
+                              title: 'Операция повторена',
+                              amount: tx.amount,
+                              bankName: account?.bankName ?? '',
+                              isIncome: tx.type == TransactionType.income,
+                            );
+                          },
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
             const SizedBox(height: 80),
           ],
         ),

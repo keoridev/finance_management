@@ -255,10 +255,15 @@ class MBankParserService {
         lower.contains('аванс')) {
       isIncome = true;
       isSalary = true;
-    } else if (lower.contains('пополнен') ||
-        lower.contains('зачислен') ||
+    } else if (lower.contains('вам перевели') ||
+        lower.contains('вам перевел') ||
+        lower.contains('перевели вам') ||
         lower.contains('перевод от') ||
         lower.contains('поступил') ||
+        lower.contains('поступлен') ||
+        lower.contains('входящ') ||
+        lower.contains('пополнен') ||
+        lower.contains('зачислен') ||
         lower.contains('начислен') ||
         lower.contains('popolnen') ||
         lower.contains('zachislen') ||
@@ -266,6 +271,8 @@ class MBankParserService {
         lower.contains('postupil') ||
         lower.contains('vozvrat') ||
         lower.contains('возврат') ||
+        lower.contains('кэшбэк') ||
+        lower.contains('cashback') ||
         lower.contains('которулган') ||
         text.contains('+')) {
       isIncome = true;

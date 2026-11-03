@@ -420,61 +420,63 @@ class _ShortcutPillButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _InteractiveScaleButton(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: GlassContainer(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        borderRadius: BorderRadius.circular(15),
-        surfaceColor: const Color(0xFF1C1C1E).withValues(alpha: 0.78),
-        borderColor: shortcut.color.withValues(alpha: 0.22),
-        borderWidth: 1.0,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: shortcut.color.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: shortcut.color.withValues(alpha: 0.35),
-                  width: 0.8,
+    return RepaintBoundary(
+      child: _InteractiveScaleButton(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: GlassContainer(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          borderRadius: BorderRadius.circular(15),
+          surfaceColor: const Color(0xFF1C1C1E).withValues(alpha: 0.78),
+          borderColor: shortcut.color.withValues(alpha: 0.22),
+          borderWidth: 1.0,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: shortcut.color.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: shortcut.color.withValues(alpha: 0.35),
+                    width: 0.8,
+                  ),
+                ),
+                child: Icon(shortcut.icon, color: shortcut.color, size: 14),
+              ),
+              const SizedBox(width: 8),
+
+              // Title
+              Text(
+                shortcut.title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                  letterSpacing: -0.1,
                 ),
               ),
-              child: Icon(shortcut.icon, color: shortcut.color, size: 14),
-            ),
-            const SizedBox(width: 8),
+              const SizedBox(width: 7),
 
-            // Title
-            Text(
-              shortcut.title,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-                letterSpacing: -0.1,
-              ),
-            ),
-            const SizedBox(width: 7),
-
-            // Amount badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: shortcut.color.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                CurrencyFormatter.format(shortcut.amount),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: shortcut.color,
+              // Amount badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: shortcut.color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  CurrencyFormatter.format(shortcut.amount),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: shortcut.color,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -504,20 +506,27 @@ class _InteractiveScaleButtonState extends State<_InteractiveScaleButton> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTapDown: (_) {
         setState(() => _isPressed = true);
         HapticFeedback.lightImpact();
       },
-      onTapUp: (_) {
+      onTapUp: (_) async {
         setState(() => _isPressed = false);
-        widget.onTap();
+        // Micro-delay so spring release begins cleanly before controller executes
+        await Future.delayed(const Duration(milliseconds: 60));
+        if (mounted) {
+          widget.onTap();
+        }
       },
-      onTapCancel: () => setState(() => _isPressed = false),
+      onTapCancel: () {
+        if (mounted) setState(() => _isPressed = false);
+      },
       onLongPress: widget.onLongPress,
       child: AnimatedScale(
-        scale: _isPressed ? 0.94 : 1.0,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOutCubic,
+        scale: _isPressed ? 0.92 : 1.0,
+        duration: const Duration(milliseconds: 130),
+        curve: Curves.easeOutBack,
         child: widget.child,
       ),
     );

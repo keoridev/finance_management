@@ -59,10 +59,15 @@ class MBankNotificationListenerService : NotificationListenerService() {
             val combined = "$title $text $bigText $subText $infoText $ticker".trim()
             if (combined.isEmpty()) return
 
-            // 1. Whitelist package check (Section 3.2)
+            // 1. Whitelist package or bank sender check (Section 3.2)
             val isWhitelisted = BankPatternConfig.isWhitelistedPackage(pkg)
             val isSms = pkg.contains("messaging") || pkg.contains("mms") || pkg.contains("sms")
-            if (!isWhitelisted && !isSms) {
+            val isBankSender = title == "1444" || title == "2424" || title == "2929" ||
+                    title.contains("mbank", ignoreCase = true) ||
+                    title.contains("optima", ignoreCase = true) ||
+                    title.contains("bakai", ignoreCase = true) ||
+                    title.contains("demir", ignoreCase = true)
+            if (!isWhitelisted && !isSms && !isBankSender) {
                 return
             }
 
@@ -72,36 +77,22 @@ class MBankNotificationListenerService : NotificationListenerService() {
                 return
             }
 
-            // 3. Check for expense markers or currency
+            // 3. Check for expense/income markers or currency
             val hasExpenseMarker = BankPatternConfig.PUSH_EXPENSE_MARKERS.any { combined.contains(it, ignoreCase = true) }
+            val isIncome = BankPatternConfig.isIncomeTransaction(combined)
             val hasCurrency = combined.contains("сом", ignoreCase = true) ||
                     combined.contains("KGS", ignoreCase = true) ||
                     combined.contains("som", ignoreCase = true) ||
                     Pattern.compile("\\d+\\s*(?:с\\.|c\\.|[cс]\\b)", Pattern.CASE_INSENSITIVE).matcher(combined).find()
 
-            if (!hasExpenseMarker && !hasCurrency) {
+            if (!hasExpenseMarker && !isIncome && !hasCurrency) {
                 return
             }
 
-            // 4. Parse Amount via Section 3.1 regex
-            val amountMatcher = BankPatternConfig.AMOUNT_REGEX.matcher(combined)
-            val (amount, currency) = if (amountMatcher.find()) {
-                val rawNum = amountMatcher.group(1)?.replace(" ", "")?.replace("\u00A0", "")?.replace(",", ".") ?: "0"
-                val parsedAmt = rawNum.toDoubleOrNull() ?: 0.0
-                val rawCurr = amountMatcher.group(2)?.uppercase() ?: "KGS"
-                val normCurr = when {
-                    rawCurr.contains("СОМ") || rawCurr.contains("KGS") || rawCurr.contains("SOM") ||
-                            rawCurr == "C" || rawCurr == "С" || rawCurr.startsWith("C.") || rawCurr.startsWith("С.") -> "KGS"
-                    rawCurr.contains("РУБ") || rawCurr.contains("RUB") -> "RUB"
-                    rawCurr.contains("USD") || rawCurr.contains("$") -> "USD"
-                    rawCurr.contains("EUR") -> "EUR"
-                    rawCurr.contains("KZT") || rawCurr.contains("ТЕНГЕ") -> "KZT"
-                    else -> "KGS"
-                }
-                Pair(parsedAmt, normCurr)
-            } else {
-                Pair(0.0, "KGS")
-            }
+            // 4. Parse Amount & Currency via accurate multi-pass extractor
+            val parsedPair = BankPatternConfig.extractTransactionAmount(combined)
+            val amount = parsedPair?.first ?: 0.0
+            val currency = parsedPair?.second ?: "KGS"
 
             // 5. Extract Recipient / Target Identifier (Section 3.3)
             var targetIdentifier = "UNKNOWN"
@@ -144,7 +135,8 @@ class MBankNotificationListenerService : NotificationListenerService() {
                     targetIdentifier = targetIdentifier,
                     title = bankTitle,
                     body = finalBody,
-                    timestamp = sbn.postTime
+                    timestamp = sbn.postTime,
+                    isIncome = isIncome
                 )
             }
         } catch (e: Exception) {

@@ -72,7 +72,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
         targetIdentifier: String = "UNKNOWN",
         title: String = "Перевод",
         rawText: String = "",
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        isIncome: Boolean = false
     ): StoredTransaction? {
         val windowStart = timestamp - BankPatternConfig.DEFAULT_TTL_MS
 
@@ -120,14 +121,15 @@ class TransactionDeduplicationManager private constructor(private val context: C
             targetIdentifier = targetIdentifier,
             title = title,
             rawText = rawText,
-            createdAt = timestamp
+            createdAt = timestamp,
+            isIncome = isIncome
         )
 
         saveToFlutterPendingQueue(tx)
         broadcastTransactionEvent(tx)
         postSystemNotification(tx)
 
-        Log.i(TAG, "CONFIRMED_UI transaction recorded: $amount $currency to $targetIdentifier ($title)")
+        Log.i(TAG, "CONFIRMED_UI transaction recorded: ${if (isIncome) "+" else "-"}$amount $currency to $targetIdentifier ($title)")
         return tx
     }
 
@@ -136,7 +138,7 @@ class TransactionDeduplicationManager private constructor(private val context: C
      * Implements Section 3.3:
      * - Check buffer for last 15 minutes.
      * - If match found -> mark as VERIFIED_BY_PUSH, do NOT deduct balance twice!
-     * - If no match (screen missed/FLAG_SECURE) -> status = CONFIRMED_PUSH, record new expense.
+     * - If no match (screen missed/FLAG_SECURE) -> status = CONFIRMED_PUSH, record new transaction.
      */
     @Synchronized
     fun onPushNotificationCaptured(
@@ -146,7 +148,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
         targetIdentifier: String = "UNKNOWN",
         title: String = "MBank",
         body: String = "",
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        isIncome: Boolean = false
     ): StoredTransaction {
         val windowStart = timestamp - BankPatternConfig.DEFAULT_TTL_MS
         val rawText = "$title: $body".trim()
@@ -164,7 +167,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
             val updatedTx = matchingUiTx.copy(
                 status = "VERIFIED_BY_PUSH",
                 isVerified = true,
-                rawText = rawText
+                rawText = rawText,
+                isIncome = if (isIncome) true else matchingUiTx.isIncome
             )
 
             // Update queue so if Flutter is opened later it won't duplicate
@@ -203,14 +207,15 @@ class TransactionDeduplicationManager private constructor(private val context: C
             targetIdentifier = targetIdentifier,
             title = title,
             rawText = rawText,
-            createdAt = timestamp
+            createdAt = timestamp,
+            isIncome = isIncome
         )
 
         saveToFlutterPendingQueue(tx)
         broadcastTransactionEvent(tx)
         postSystemNotification(tx)
 
-        Log.i(TAG, "CONFIRMED_PUSH recorded: $amount $currency ($title)")
+        Log.i(TAG, "CONFIRMED_PUSH recorded: ${if (isIncome) "+" else "-"}$amount $currency ($title)")
         return tx
     }
 
@@ -243,10 +248,11 @@ class TransactionDeduplicationManager private constructor(private val context: C
             } else null
 
             val cleanAmt = String.format(Locale.US, "%.2f", tx.amount)
-            val titleText = if (tx.title.isNotEmpty() && tx.title != "MBank") {
+            val sign = if (tx.isIncome) "+" else "−"
+            val titleText = if (tx.title.isNotEmpty() && tx.title != "MBank" && tx.title != "Банк") {
                 tx.title
             } else {
-                "Перевод зафиксирован: −$cleanAmt сом"
+                if (tx.isIncome) "Пополнение зафиксировано: +$cleanAmt сом" else "Платеж зафиксирован: −$cleanAmt сом"
             }
 
             val targetDesc = if (tx.targetIdentifier.isNotEmpty() && tx.targetIdentifier != "UNKNOWN") {
@@ -254,7 +260,7 @@ class TransactionDeduplicationManager private constructor(private val context: C
             } else {
                 "MBank"
             }
-            val bodyText = "$targetDesc • −$cleanAmt сом зафиксировано в фоне"
+            val bodyText = "$targetDesc • $sign$cleanAmt сом зафиксировано в фоне"
 
             val builder = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
@@ -290,6 +296,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
                     item.put("isVerified", tx.isVerified)
                     item.put("rawText", tx.rawText)
                     item.put("body", tx.rawText)
+                    item.put("isIncome", tx.isIncome)
+                    item.put("type", if (tx.isIncome) "income" else "expense")
                     updatedExisting = true
                     break
                 }
@@ -310,6 +318,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
                     put("rawText", tx.rawText)
                     put("body", tx.rawText)
                     put("timestamp", tx.createdAt)
+                    put("isIncome", tx.isIncome)
+                    put("type", if (tx.isIncome) "income" else "expense")
                 }
                 jsonArray.put(obj)
             }
@@ -342,6 +352,8 @@ class TransactionDeduplicationManager private constructor(private val context: C
             putExtra("body", tx.rawText)
             putExtra("rawText", tx.rawText)
             putExtra("timestamp", tx.createdAt)
+            putExtra("isIncome", tx.isIncome)
+            putExtra("type", if (tx.isIncome) "income" else "expense")
             setPackage(context.packageName)
         }
         context.sendBroadcast(intent)
