@@ -1,4 +1,4 @@
-﻿package com.example.finance_management
+package com.example.finance_management
 
 import android.accessibilityservice.AccessibilityService
 import android.app.AlarmManager
@@ -1588,10 +1588,10 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         }
 
         // =========================================================================
-<<<<<<< HEAD
-        // ПРИОРИТЕТ 3: Соседние узлы со словами-якорями (карт-счет, доступно, эсеп, калдык)
         // =========================================================================
-        val anchorWords = listOf("карт-счет", "карт счет", "доступно", "эсеп", "калдык", "мой банк", "дебетовая")
+        // PRIORITY 3: Anchor words (account, available, balance)
+        // =========================================================================
+        val anchorWords = listOf("карт-счет", "карт счет", "доступно", "эсеп", "калдык", "дебетовая")
         for (i in texts.indices) {
             val lower = texts[i].lowercase(Locale.ROOT).trim()
             if (anchorWords.any { lower == it || lower.startsWith("$it:") || lower.contains(it) }) {
@@ -1602,62 +1602,12 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                         val amt = parseCardBalanceCandidate(candidateText)
                         if (amt != null && amt >= 0.0) {
                             Log.i(TAG, "Scraped card balance via anchor [$lower]: $amt (from '$candidateText')")
-=======
-        // ПРИОРИТЕТ 3: Соседние узлы со словами-якорями (баланс, карт-счет, доступно, эсеп, калдык)
-        // ВАЖНО: якоря баланса должны быть СТРОГИМИ, а не общими ("мой банк", "mbank" - это название шапки, а не баланс!)
-        // =========================================================================
-        val anchorWords = listOf(
-            "баланс", "доступно", "остаток", "карт-счет", "карт счет",
-            "эсеп", "калдык"
-        )
-        for (i in texts.indices) {
-            val lower = texts[i].lowercase(Locale.ROOT).trim()
-            if (anchorWords.any { lower == it || lower.startsWith(it + ":") || lower.startsWith(it + " ") }) {
-                for (offset in 1..3) {
-                    if (i + offset < texts.size) {
-                        val candidateText = texts[i + offset].trim()
-                        val candLower = candidateText.lowercase(Locale.ROOT)
-                        // Игнорируем рекламу, промо-акции, лотереи (Маниполия, призы, кэшбэк, за месяц)
-                        if (candLower.contains("за ") || candLower.contains("расход") ||
-                            candLower.contains("приз") || candLower.contains("манипол") ||
-                            candLower.contains("акци") || candLower.contains("бонус") ||
-                            candLower.contains("эксклюзив")) {
-                            continue
-                        }
-                        val amt = parseAmount(candidateText)
-                        if (amt != null && amt > 10.0 && amt != 350000.0 && amt != 50000000.0) {
-                            Log.i(TAG, "Scraped card balance via anchor [" + lower + "]: " + amt + " (from '" + candidateText + "')")
->>>>>>> 058a5cc7c8b2da8faa87ce75c83dd4b559c907a6
                             return amt
                         }
                     }
                 }
             }
         }
-<<<<<<< HEAD
-=======
-        // =========================================================================
-        // ПРИОРИТЕТ 4: Сканирование всех узлов с валютой ⃀ (\u20C0), сом или с
-        // Отсекаем блоки трат ("За Ноябрь", "Маниполия", "Кэшбэк")
-        // =========================================================================
-        for (i in texts.indices) {
-            val text = texts[i].trim()
-            // Check if text has currency symbol (⃀, \u20C0, сом, с, c)
-            val hasCurrency = text.contains("\u20C0") || text.contains("⃀") || text.contains("сом", ignoreCase = true) || text.endsWith(" с", ignoreCase = true) || text.endsWith(" c", ignoreCase = true)
-            if (hasCurrency) {
-                // If previous node was a spending tracker ("За Ноябрь", "За месяц", "Расходы", "Маниполия"), skip it!
-                val prev = if (i > 0) texts[i - 1].lowercase(Locale.ROOT) else ""
-                if (prev.contains("за ") || prev.contains("ноябр") || prev.contains("декабр") || prev.contains("расход") || prev.contains("трат") || prev.contains("манипол")) {
-                    continue
-                }
-                val amt = parseAmount(text)
-                if (amt != null && amt > 10.0 && amt != 480.0 && amt != 350000.0 && amt != 50000000.0) {
-                    Log.i(TAG, "Scraped card balance via currency token: $amt (from '$text')")
-                    return amt
-                }
-            }
-        }
->>>>>>> 058a5cc7c8b2da8faa87ce75c83dd4b559c907a6
 
         return null
     }
