@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/transaction_type.dart';
 import '../state/finance_controller.dart';
 import '../state/notification_controller.dart';
@@ -218,6 +219,8 @@ class SettingsScreen extends StatelessWidget {
                           await WidgetLaunchService.openNotificationListenerSettings();
                         },
                       ),
+                      _buildDivider(),
+                      const _SocialBlockerSettingsTile(),
                     ],
                   ),
                 ),
@@ -1432,4 +1435,114 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 }
+
+class _SocialBlockerSettingsTile extends StatefulWidget {
+  const _SocialBlockerSettingsTile();
+
+  @override
+  State<_SocialBlockerSettingsTile> createState() => _SocialBlockerSettingsTileState();
+}
+
+class _SocialBlockerSettingsTileState extends State<_SocialBlockerSettingsTile> {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadState();
+  }
+
+  Future<void> _loadState() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _enabled = prefs.getBool('arc_social_blocker_enabled') ?? false;
+      });
+    }
+  }
+
+  Future<void> _toggle(bool val) async {
+    HapticFeedback.lightImpact();
+    setState(() => _enabled = val);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('arc_social_blocker_enabled', val);
+    await prefs.setBool('arc_social_blocker_active', val);
+    await prefs.setString('arc_social_blocker_mode', val ? 'always' : 'off');
+    await WidgetLaunchService.syncSocialBlockerConfig(
+      enabled: val,
+      isBlocked: val,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF2C2C2E),
+          content: Text(
+            val
+                ? 'Блокиратор включен: при открытии соцсетей покажет окно с паузой'
+                : 'Блокиратор соцсетей полностью отключен',
+            style: const TextStyle(color: Colors.white),
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: (_enabled ? const Color(0xFFFF453A) : const Color(0xFF8E8E93))
+                  .withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.block_flipped,
+              size: 20,
+              color: _enabled ? const Color(0xFFFF453A) : const Color(0xFF8E8E93),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Блокиратор соцсетей (YouTube, TikTok)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _enabled
+                      ? 'Включен: всплывающее окно с возможностью паузы на 15 мин'
+                      : 'Отключен: приложения не закрываются и не блокируются',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          CupertinoSwitch(
+            value: _enabled,
+            activeColor: const Color(0xFFFF9F0A),
+            onChanged: _toggle,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 

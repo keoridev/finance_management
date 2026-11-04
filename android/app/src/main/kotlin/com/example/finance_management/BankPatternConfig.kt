@@ -55,24 +55,23 @@ object BankPatternConfig {
         "платеж выполнен",
         "платеж проведен",
         "платеж совершен",
+        "платеж успешен",
         "оплата проведена",
         "оплата прошла",
+        "оплата успешна",
+        "успешная оплата",
         "операция выполнена",
         "транзакция завершена",
-        "успешно",
-        "исполнен",
-        "принят в обработку",
-        "в обработке",
-        "чек",
-        "квитанция",
-        "детали перевода",
-        "детали платежа",
-        "детали операции",
+        "чек операции",
+        "электронный чек",
         "поделиться чеком",
         "поделиться квитанцией",
         "сохранить чек",
-        "готово",
-        "отправлено"
+        "сохранить квитанцию",
+        "квитанция об оплате",
+        "квитанция по операции",
+        "акча которулду",
+        "төлөм аткарылды"
     )
 
     // Buttons triggering transfer execution in banking apps
@@ -98,9 +97,9 @@ object BankPatternConfig {
         "лимит исчерпан"
     )
 
-    // Regex specified in Section 3.1 for amount parsing with thousand separators and decimals
+    // Regex specified in Section 3.1 for amount parsing with thousand separators and decimals (mandatory currency token)
     val AMOUNT_REGEX: Pattern = Pattern.compile(
-        "(?i)(?:сумма|перевод|списано|итог|оплата|покупка)?[:\\s]*([0-9]{1,3}(?:[ \\xA0,][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|с\\.|c\\.|[cс]\\b)?",
+        "(?i)(?:сумма|списано|итог|оплата|покупка|к\\s+оплате)[:\\s–—\\-]*([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|⃀|\u20C0|с\\.|c\\.|[cс]\\b)",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -251,22 +250,40 @@ object BankPatternConfig {
     }
 
     /**
+     * Prevents parsing Kyrgyz country phone code (+996 or 996) as a 996 SOM transaction amount.
+     */
+    fun isLikelyPhoneNumberPrefix(amt: Double, text: String): Boolean {
+        if (amt == 996.0) {
+            val lower = text.lowercase(java.util.Locale.ROOT)
+            if (lower.contains("+996") || lower.contains("996 7") || lower.contains("996 5") ||
+                lower.contains("996 9") || lower.contains("996 2") || lower.contains("9967") ||
+                lower.contains("9965") || lower.contains("9969") || lower.contains("9962") ||
+                lower.contains("номер") || lower.contains("телефон") || lower.contains("тел:") ||
+                lower.contains("тел ") || lower.contains("+ 996")
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
      * Extracts the real transaction amount from banking push or text,
-     * carefully skipping card numbers (*1234), shortcodes (1444), and balance numbers.
+     * carefully skipping card numbers (*1234), shortcodes (1444), phone prefixes (+996), and balance numbers.
      */
     fun extractTransactionAmount(text: String): Pair<Double, String>? {
         if (text.isBlank()) return null
 
-        // Priority 1: Amount directly preceded by an action verb (e.g. "Оплата: 450 сом", "Списание 350 KGS", "Зачислено 5000 сом")
+        // Priority 1: Amount directly preceded by an action verb with MANDATORY currency indicator
         val actionPattern = Pattern.compile(
-            "(?i)(?:оплата|покупка|списание|перевод|пополнение|зачисление|снятие|platezh|oplata|popolnen|spisanie|pokupka|төлөм|которулган|сумма|итог)[:\\s–—\\-]+([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|с\\.|c\\.|[cс]\\b)?",
+            "(?i)(?:оплата|покупка|списание|пополнение|зачисление|снятие|platezh|oplata|popolnen|spisanie|pokupka|төлөм|которулган|сумма|итог|к\\s+оплате)[:\\s–—\\-]+([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|⃀|\u20C0|с\\.|c\\.|[cс]\\b)",
             Pattern.CASE_INSENSITIVE
         )
         val actionMatcher = actionPattern.matcher(text)
         if (actionMatcher.find()) {
             val rawNum = actionMatcher.group(1)?.replace(" ", "")?.replace("\u00A0", "")?.replace(",", ".")
             val amt = rawNum?.toDoubleOrNull()
-            if (amt != null && amt > 0.0 && amt < 50_000_000.0) {
+            if (amt != null && amt > 0.0 && amt < 50_000_000.0 && !isLikelyPhoneNumberPrefix(amt, text)) {
                 val rawCurr = actionMatcher.group(2) ?: "KGS"
                 return Pair(amt, normalizeCurrency(rawCurr))
             }
@@ -274,14 +291,14 @@ object BankPatternConfig {
 
         // Priority 2: Amount with explicit sign (e.g. "+ 1 250.00 KGS", "−350 сом", "-500 c")
         val signedPattern = Pattern.compile(
-            "(?:[+\\-–—])\\s*([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|с\\.|c\\.|[cс]\\b)",
+            "(?:[+\\-–—])\\s*([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|⃀|\u20C0|с\\.|c\\.|[cс]\\b)",
             Pattern.CASE_INSENSITIVE
         )
         val signedMatcher = signedPattern.matcher(text)
         if (signedMatcher.find()) {
             val rawNum = signedMatcher.group(1)?.replace(" ", "")?.replace("\u00A0", "")?.replace(",", ".")
             val amt = rawNum?.toDoubleOrNull()
-            if (amt != null && amt > 0.0 && amt < 50_000_000.0) {
+            if (amt != null && amt > 0.0 && amt < 50_000_000.0 && !isLikelyPhoneNumberPrefix(amt, text)) {
                 val rawCurr = signedMatcher.group(2) ?: "KGS"
                 return Pair(amt, normalizeCurrency(rawCurr))
             }
@@ -290,7 +307,7 @@ object BankPatternConfig {
         // Priority 3: Amount with MANDATORY currency indicator (e.g. "450 сом", "1 200 KGS"),
         // excluding card numbers (*1234) and balance amounts ("доступно 5000", "баланс 5000")
         val currencyPattern = Pattern.compile(
-            "\\b([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|с\\.|c\\.|[cс]\\b)",
+            "\\b([0-9]{1,3}(?:[ \\xA0][0-9]{3})*(?:[.,][0-9]{1,2})?|[0-9]+(?:[.,][0-9]{1,2})?)\\s*(сом|kgs|руб|rub|\\$|usd|eur|тенге|kzt|⃀|\u20C0|с\\.|c\\.|[cс]\\b)",
             Pattern.CASE_INSENSITIVE
         )
         val curMatcher = currencyPattern.matcher(text)
@@ -299,12 +316,15 @@ object BankPatternConfig {
             val prefix = if (startIdx > 20) text.substring(startIdx - 20, startIdx).lowercase() else text.substring(0, startIdx).lowercase()
 
             // Skip balance amounts
-            if (prefix.contains("баланс") || prefix.contains("доступно") || prefix.contains("остаток") || prefix.contains("калдык")) {
+            if (prefix.contains("баланс") || prefix.contains("доступно") || prefix.contains("остаток") || prefix.contains("калдык") || prefix.contains("жеткиликтүү")) {
                 continue
             }
 
             val rawNum = curMatcher.group(1)?.replace(" ", "")?.replace("\u00A0", "")?.replace(",", ".")
             val amt = rawNum?.toDoubleOrNull() ?: continue
+            if (isLikelyPhoneNumberPrefix(amt, text)) {
+                continue
+            }
             val rawCurr = curMatcher.group(2) ?: "KGS"
             if (amt > 0.0 && amt < 50_000_000.0) {
                 return Pair(amt, normalizeCurrency(rawCurr))
@@ -318,6 +338,7 @@ object BankPatternConfig {
         val u = raw.uppercase()
         return when {
             u.contains("СОМ") || u.contains("KGS") || u.contains("SOM") ||
+                    u.contains("⃀") || u.contains("\u20C0") ||
                     u == "C" || u == "С" || u.startsWith("C.") || u.startsWith("С.") -> "KGS"
             u.contains("РУБ") || u.contains("RUB") -> "RUB"
             u.contains("USD") || u.contains("$") -> "USD"

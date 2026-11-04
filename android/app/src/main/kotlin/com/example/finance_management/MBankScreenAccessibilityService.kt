@@ -62,6 +62,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         // Pre-transaction alert rate limiting: amount -> timestamp
         private var lastPreTxAlertTime = 0L
         private var lastPreTxAlertAmount = 0.0
+        private var userBypassedCapybaraTime = 0L
+        private var userBypassedAmount = 0.0
 
         // Shadow balance cache: bankName -> lastBalance
         private val lastScrapedBalances = mutableMapOf<String, Double>()
@@ -160,10 +162,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 return
             }
 
-            // Show floating Capybara Chat Head when in a banking app
-            if (isTargetBankingApp(packageNameStr)) {
-                mainHandler.post { showFloatingBubble() }
-            } else {
+            // Keep floating bubble dismissed per user preference (prevents blocking bank UI)
+            if (floatingBubbleView != null) {
                 mainHandler.post { hideFloatingBubble() }
             }
 
@@ -200,28 +200,29 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
 
             // ПРИОРИТЕТ 1: Экран дашборда банка (Главный экран, баланс, карты, счета)
-            // Должен проверяться ПЕРВЫМ! Если открыт главный экран банка — это учет баланса, а НЕ списание/чек!
-            if (isTargetBankingApp(packageNameStr) && isDashboardScreen(fullCombined)) {
+            // Всегда обрабатываем дашборд первым, чтобы кнопки меню/QR и промо-баннеры не считались чеками!
+            val isDashboard = isDashboardScreenFast(fullCombined) || isDashboardScreen(fullCombined)
+            if (isTargetBankingApp(packageNameStr) && isDashboard) {
                 pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
                 activePendingTransfer = null
                 analyzeDashboardBalances(texts, packageNameStr, fullCombined)
                 return
             }
 
-            // ПРИОРИТЕТ 2: Экран ввода суммы / подтверждения (Capybara-Filter)
-            val isPreConfirmation = isPreTransactionScreen(fullCombined)
-            if (isPreConfirmation) {
-                analyzePreTransactionCheckout(texts, packageNameStr, fullCombined)
-                return
-            }
-
-            // ПРИОРИТЕТ 3: Экран завершенного перевода / чек операции
+            // ПРИОРИТЕТ 2: Экран завершенного перевода / чек операции
             val isReceipt = isReceiptScreenText(fullCombined)
             if (isReceipt) {
                 pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
                 val pending = activePendingTransfer
                 activePendingTransfer = null
                 analyzeReceiptScreen(texts, packageNameStr, fullCombined, pending)
+                return
+            }
+
+            // ПРИОРИТЕТ 3: Экран ввода суммы / подтверждения перевода (Capybara-Filter)
+            val isPreConfirmation = isTransferScreen(fullCombined) || isPreTransactionScreen(fullCombined)
+            if (isPreConfirmation) {
+                analyzePreTransactionCheckout(texts, packageNameStr, fullCombined)
                 return
             }
         } catch (e: Exception) {
@@ -283,6 +284,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 val amountStr = matcher.group(1) ?: continue
                 val amount = amountStr.toDoubleOrNull() ?: continue
                 if (amount <= 0 || amount > 100_000) continue
+                if (BankPatternConfig.isLikelyPhoneNumberPrefix(amount, text)) continue
 
                 val matchedPhrase = matcher.group(0)?.trim() ?: "скинь $amountStr сом"
                 val signature = "${amount.toInt()}_${matchedPhrase.lowercase(Locale.ROOT)}"
@@ -407,93 +409,44 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         return hasHistoryControls || hasHistoryTitle
     }
 
-    private fun isDashboardScreen(fullCombined: String): Boolean {
-        // Никогда не считаем дашбордом экран истории операций
-        if (isHistoryScreen(fullCombined)) {
-            return false
-        }
-
-        // Если это явный чек с кнопками сохранения/шеринга — это НЕ дашборд!
-        val hasStrictReceiptHeader = fullCombined.contains("поделиться чеком") ||
-                fullCombined.contains("сохранить чек") ||
-                fullCombined.contains("чек операции") ||
-                fullCombined.contains("квитанция по операции") ||
-                fullCombined.contains("квитанция об оплате") ||
-                fullCombined.contains("перевод выполнен") ||
-                fullCombined.contains("деньги отправлены") ||
-                fullCombined.contains("платеж успешно проведен") ||
-                fullCombined.contains("перевод успешен")
-
-        if (hasStrictReceiptHeader) {
-            return false
-        }
-
-        // Если это экран ввода реквизитов / подтверждения перед отправкой — это не дашборд
-        if (isTransferInputScreen(fullCombined)) {
-            return false
-        }
-
-        // Маркеры главного экрана / дашборда банка (MBank, Optima, Bakai, Demir и др.)
-        val hasDashboardCore = fullCombined.contains("главная") ||
+    private fun isDashboardScreenFast(fullCombined: String): Boolean {
+        // Явные маркеры главного экрана банка, экрана карт/счетов или витрины
+        return fullCombined.contains("главная") ||
                 fullCombined.contains("башкы") ||
-                fullCombined.contains("мои карты") ||
-                fullCombined.contains("карты и счета") ||
-                fullCombined.contains("карт-счет") ||
-                fullCombined.contains("мои счета") ||
                 fullCombined.contains("мой банк") ||
-                fullCombined.contains("mbank") ||
-                fullCombined.contains("mmarket") ||
-                fullCombined.contains("все сервисы") ||
-                fullCombined.contains("сервисы") ||
-                fullCombined.contains("платежи") ||
-                fullCombined.contains("карталар") ||
-                fullCombined.contains("эсеп") ||
-                fullCombined.contains("доступно") ||
-                fullCombined.contains("баланс") ||
-                fullCombined.contains("калдык")
-
-        // Типичные элементы дашборда банка
-        val hasDashboardElements = (fullCombined.contains("пополнить") || fullCombined.contains("толуктоо")) ||
-                (fullCombined.contains("перевести") || fullCombined.contains("которуу")) ||
-                fullCombined.contains("сканировать qr") ||
-                fullCombined.contains("мой qr") ||
-                fullCombined.contains("сервисы") ||
-                fullCombined.contains("платежи") ||
-                fullCombined.contains("история") ||
-                fullCombined.contains("еще") ||
-                fullCombined.contains("маниполия")
-
-        return hasDashboardCore && (hasDashboardElements || fullCombined.contains("главная"))
-    }
-
-    private fun isTransferInputScreen(fullCombined: String): Boolean {
-        // Экран ввода реквизитов / подтверждения перед отправкой (деньги еще НЕ отправлены!)
-        val hasInputMarkers = fullCombined.contains("введите сумму") ||
-                fullCombined.contains("введите номер") ||
-                fullCombined.contains("сумма перевода") ||
-                fullCombined.contains("комиссия:") ||
-                fullCombined.contains("откуда:") ||
-                fullCombined.contains("куда:") ||
-                fullCombined.contains("со счета:") ||
-                fullCombined.contains("на счет:") ||
-                fullCombined.contains("кошелек получателя") ||
-                fullCombined.contains("подтвердить перевод") ||
-                fullCombined.contains("к оплате:")
-
-        val hasSuccessMarker = fullCombined.contains("перевод выполнен") ||
-                fullCombined.contains("деньги отправлены") ||
-                fullCombined.contains("оплата проведена") ||
-                fullCombined.contains("поделиться чеком") ||
-                fullCombined.contains("чек операции")
-
-        return hasInputMarkers && !hasSuccessMarker
+                fullCombined.contains("счета и карты") ||
+                fullCombined.contains("карты и счета") ||
+                fullCombined.contains("мои карты") ||
+                fullCombined.contains("мои счета") ||
+                fullCombined.contains("мои продукты") ||
+                fullCombined.contains("драгоценные металлы") ||
+                fullCombined.contains("манипол") ||
+                fullCombined.contains("события недели") ||
+                fullCombined.contains("покупайте авто") ||
+                fullCombined.contains("эксклюзив:") ||
+                fullCombined.contains("эксклюзив") ||
+                (fullCombined.contains("сервисы") && fullCombined.contains("платежи")) ||
+                (fullCombined.contains("mmarket") && fullCombined.contains("mbank"))
     }
 
     private fun isReceiptScreenText(fullCombined: String): Boolean {
-        // Никогда не парсим экран истории операций, дашборд или экран подготовки перевода как чек!
-        if (isHistoryScreen(fullCombined) || isDashboardScreen(fullCombined) || isTransferInputScreen(fullCombined)) {
+        // Никогда не парсим экран истории операций или дашборд как отдельный чек
+        if (isDashboardScreenFast(fullCombined) || isHistoryScreen(fullCombined)) {
             return false
         }
+
+        // Оплата по QR (в MBank: "Оплата по QR", "QR төлөм", "Чек операции" + обязательный статус успеха)
+        val isQrPaymentReceipt = (fullCombined.contains("оплата по qr") ||
+                fullCombined.contains("оплата через qr") ||
+                fullCombined.contains("qr төлөм") ||
+                fullCombined.contains("чек qr")) &&
+                (fullCombined.contains("успешно") || fullCombined.contains("проведена") ||
+                 fullCombined.contains("выполнена") || fullCombined.contains("чек операции") ||
+                 fullCombined.contains("электронный чек") || fullCombined.contains("поделиться чеком") ||
+                 fullCombined.contains("сохранить чек") || fullCombined.contains("акча которулду") ||
+                 fullCombined.contains("төлөм аткарылды"))
+
+        if (isQrPaymentReceipt) return true
 
         // Чек ОБЯЗАН иметь однозначный заголовок завершения операции или кнопки чека
         return BankPatternConfig.isSuccessScreen(fullCombined) ||
@@ -510,10 +463,108 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 fullCombined.contains("поделиться чеком") ||
                 fullCombined.contains("сохранить чек") ||
                 fullCombined.contains("чек операции") ||
+                fullCombined.contains("электронный чек") ||
                 fullCombined.contains("квитанция по операции") ||
                 fullCombined.contains("квитанция об оплате") ||
+                fullCombined.contains("акча которулду") ||
+                fullCombined.contains("төлөм аткарылды") ||
                 (fullCombined.contains("успешно") && (fullCombined.contains("перевод") || fullCombined.contains("платеж") || fullCombined.contains("оплачен") || fullCombined.contains("отправлен")))
     }
+
+    private fun isTransferInputScreen(fullCombined: String): Boolean {
+        if (isDashboardScreenFast(fullCombined) || isReceiptScreenText(fullCombined)) return false
+
+        // Экран ввода реквизитов / подтверждения перед отправкой (деньги еще НЕ отправлены!)
+        val hasInputMarkers = fullCombined.contains("введите сумму") ||
+                fullCombined.contains("введите номер") ||
+                fullCombined.contains("сумма перевода") ||
+                fullCombined.contains("комиссия") ||
+                fullCombined.contains("откуда:") ||
+                fullCombined.contains("куда:") ||
+                fullCombined.contains("со счета") ||
+                fullCombined.contains("на счет") ||
+                fullCombined.contains("кошелек получателя") ||
+                fullCombined.contains("подтвердить перевод") ||
+                fullCombined.contains("к оплате")
+
+        return hasInputMarkers
+    }
+
+    private fun isTransferScreen(fullCombined: String): Boolean {
+        if (isDashboardScreenFast(fullCombined) || isReceiptScreenText(fullCombined) || isHistoryScreen(fullCombined)) {
+            return false
+        }
+
+        val hasTransferTitle = fullCombined.contains("перевод клиенту") ||
+                fullCombined.contains("перевод по номеру") ||
+                fullCombined.contains("перевод на карту") ||
+                fullCombined.contains("перевод на счет") ||
+                fullCombined.contains("между своими счетами") ||
+                fullCombined.contains("переводы") ||
+                fullCombined.contains("акча которуу") ||
+                fullCombined.contains("которуу")
+
+        val hasTransferFields = fullCombined.contains("сумма") ||
+                fullCombined.contains("введите сумму") ||
+                fullCombined.contains("сумма перевода") ||
+                fullCombined.contains("номер получателя") ||
+                fullCombined.contains("получатель") ||
+                fullCombined.contains("кому") ||
+                fullCombined.contains("откуда") ||
+                fullCombined.contains("со счета") ||
+                fullCombined.contains("на счет") ||
+                fullCombined.contains("комиссия")
+
+        val hasTransferAction = fullCombined.contains("перевести") ||
+                fullCombined.contains("отправить") ||
+                fullCombined.contains("оплатить") ||
+                fullCombined.contains("подтвердить")
+
+        return (hasTransferTitle && (hasTransferFields || hasTransferAction)) ||
+                (hasTransferFields && hasTransferAction) ||
+                isTransferInputScreen(fullCombined)
+    }
+
+    private fun isDashboardScreen(fullCombined: String): Boolean {
+        // Никогда не считаем дашбордом экран истории операций или чек
+        if (isHistoryScreen(fullCombined) || isReceiptScreenText(fullCombined)) {
+            return false
+        }
+
+        if (isDashboardScreenFast(fullCombined)) {
+            return true
+        }
+
+        // Маркеры главного экрана / дашборда банка (MBank, Optima, Bakai, Demir и др.)
+        val hasDashboardCore = fullCombined.contains("главная") ||
+                fullCombined.contains("башкы") ||
+                fullCombined.contains("мои карты") ||
+                fullCombined.contains("карты и счета") ||
+                fullCombined.contains("карт-счет") ||
+                fullCombined.contains("мои счета") ||
+                fullCombined.contains("мой банк") ||
+                fullCombined.contains("mbank") ||
+                fullCombined.contains("mmarket") ||
+                fullCombined.contains("все сервисы") ||
+                fullCombined.contains("карталар") ||
+                fullCombined.contains("эсеп") ||
+                fullCombined.contains("доступно") ||
+                fullCombined.contains("баланс") ||
+                fullCombined.contains("калдык")
+
+        // Типичные элементы дашборда банка
+        val hasDashboardElements = (fullCombined.contains("пополнить") || fullCombined.contains("толуктоо")) ||
+                fullCombined.contains("сканировать qr") ||
+                fullCombined.contains("мой qr") ||
+                fullCombined.contains("маниполия") ||
+                fullCombined.contains("события недели") ||
+                fullCombined.contains("покупайте авто") ||
+                fullCombined.contains("эксклюзив") ||
+                (fullCombined.contains("сервисы") && fullCombined.contains("платежи"))
+
+        return hasDashboardCore && (hasDashboardElements || fullCombined.contains("главная") || fullCombined.contains("башкы"))
+    }
+
     private fun handleViewClicked(event: AccessibilityEvent, pkg: String) {
         try {
             val clickedText = (event.text?.joinToString(" ") ?: event.contentDescription?.toString() ?: "").lowercase(Locale.ROOT)
@@ -526,13 +577,19 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             if (texts.isEmpty()) return
 
             val fullCombined = texts.joinToString(" ").lowercase(Locale.ROOT)
-            val amount = extractAmountFromTexts(texts, fullCombined) ?: return
-            if (amount <= 0.0) return
+            if (isDashboardScreenFast(fullCombined)) {
+                // Нажатия на дашборде (табы "Платежи", "Сервисы", "Главная", промо-карточки) не являются отправкой денег!
+                return
+            }
+            val amount = extractTransferInputAmount(texts, fullCombined)
+                ?: extractAmountFromTexts(texts, fullCombined)
+                ?: 0.0
 
             val merchantInfo = extractMerchantAndCategory(texts, fullCombined, false)
             val target = merchantInfo.first
 
-            updateBubbleStatus("- с", "Отправка...", isAlert = true)
+            val displayAmt = if (amount > 0.0) "${amount.toInt()}" else ""
+            updateBubbleStatus("-$displayAmt с", "Отправка...", isAlert = true)
             Log.i(TAG, "Transfer click detected ($clickedText). Staging transfer: $amount SOM to $target")
 
             pendingTransferConfirmRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -552,6 +609,40 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 Log.d(TAG, "Pending transfer intent timed out without receipt.")
             }
             mainHandler.postDelayed(pendingTransferConfirmRunnable!!, 30000L)
+
+            // Trigger Capybara-Filter warning on transfer click!
+            val now = System.currentTimeMillis()
+            if (now - userBypassedCapybaraTime < 30_000L) {
+                Log.i(TAG, "Capybara filter bypassed by user consent within 30s")
+                return
+            }
+
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val isFilterEnabled = if (prefs.contains("flutter.arc_capybara_filter_enabled")) {
+                prefs.getBoolean("flutter.arc_capybara_filter_enabled", true)
+            } else {
+                prefs.getBoolean("arc_capybara_filter_enabled", true)
+            }
+
+            if (isFilterEnabled) {
+                val threshold = try {
+                    prefs.getFloat("flutter.arc_capybara_filter_threshold", 50.0f).toDouble()
+                } catch (_: Exception) {
+                    50.0
+                }
+                if (amount >= threshold || amount == 0.0) {
+                    val dreamGoal = prefs.getString("flutter.arc_active_dream_goal", "MacBook Pro M3") ?: "MacBook Pro M3"
+                    val remainingGoal = try {
+                        prefs.getFloat("flutter.arc_active_dream_remaining", 120_000.0f).toDouble()
+                    } catch (_: Exception) {
+                        120_000.0
+                    }
+                    Log.i(TAG, "Triggering Capybara Pre-Transaction Filter from click for amount: $amount SOM")
+                    mainHandler.post {
+                        showCapybaraOverlay(amount, dreamGoal, remainingGoal)
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in handleViewClicked: ${e.message}", e)
         }
@@ -570,6 +661,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         if (amount == null || amount <= 0.0) return
 
         val isIncome = BankPatternConfig.isIncomeTransaction(fullCombined)
+        val isQr = fullCombined.contains("оплата по qr") || fullCombined.contains("qr төлөм") || fullCombined.contains("оплата через qr")
 
         val merchantInfo = extractMerchantAndCategory(texts, fullCombined, isIncome)
         var title = merchantInfo.first
@@ -582,8 +674,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         val sign = if (isIncome) "+" else "-"
         updateBubbleStatus("$sign с", "Записано!", isAlert = false)
-        Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title, isIncome: $isIncome")
-        commitTransfer(amount, title, pkg, fullCombined, isIncome, balanceAfter)
+        Log.i(TAG, "Receipt captured! Amount: $amount, Title: $title, isIncome: $isIncome, isQr: $isQr")
+        commitTransfer(amount, title, pkg, fullCombined, isIncome, balanceAfter, isQr = isQr)
     }
 
     private fun commitTransfer(
@@ -593,12 +685,13 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         fullCombined: String,
         isIncome: Boolean,
         balanceAfter: Double? = null,
-        isLagFallback: Boolean = false
+        isLagFallback: Boolean = false,
+        isQr: Boolean = false
     ) {
         val cleanAmount = String.format(Locale.US, "%.2f", amount)
         val currentTime = System.currentTimeMillis()
-        val notificationTitle = if (isIncome) "Зачисление: $title" else "Оплата: $title"
-        val suffix = if (isLagFallback) "Зафиксировано при подтверждении" else "Зафиксировано с экрана"
+        val notificationTitle = if (isIncome) "Зачисление: $title" else (if (isQr) "Оплата по QR: $title" else "Оплата: $title")
+        val suffix = if (isQr) "Чек QR-оплаты" else (if (isLagFallback) "Зафиксировано при подтверждении" else "Электронный чек")
         val notificationBody = "${if (isIncome) "+" else "−"}$cleanAmount сом • $suffix"
         val rawText = "$notificationTitle: $notificationBody"
 
@@ -638,14 +731,11 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     // =========================================================================
 
     private fun isPreTransactionScreen(fullCombined: String): Boolean {
-        // Exclude receipt keywords
-        if (fullCombined.contains("успешно") ||
-            fullCombined.contains("чек") ||
-            fullCombined.contains("квитанция") ||
-            fullCombined.contains("детали платежа") ||
-            fullCombined.contains("выполнено")
-        ) {
+        if (isDashboardScreenFast(fullCombined) || isReceiptScreenText(fullCombined) || isHistoryScreen(fullCombined)) {
             return false
+        }
+        if (isTransferScreen(fullCombined)) {
+            return true
         }
 
         return fullCombined.contains("подтвердить") ||
@@ -660,26 +750,36 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     }
 
     private fun analyzePreTransactionCheckout(texts: List<String>, pkg: String, fullCombined: String) {
-        val amount = extractAmountFromTexts(texts, fullCombined) ?: return
+        val amount = extractTransferInputAmount(texts, fullCombined)
+            ?: extractAmountFromTexts(texts, fullCombined)
+            ?: return
         if (amount <= 0.0) return
 
         // Обновляем плавающую капибару в реальном времени: она видит сумму перевода!
-        val formattedAmt = " с"
-        updateBubbleStatus("-", "Перевод?", isAlert = true)
+        val displayAmount = if (amount == amount.toInt().toDouble()) "${amount.toInt()}" else String.format(Locale.US, "%.2f", amount)
+        updateBubbleStatus("-$displayAmount с", "Перевод?", isAlert = true)
 
-        // Read user config from SharedPreferences
+        val now = System.currentTimeMillis()
+        if (now - userBypassedCapybaraTime < 30_000L) {
+            return
+        }
+
+        // Read user config from SharedPreferences (default true!)
         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
         val isFilterEnabled = if (prefs.contains("flutter.arc_capybara_filter_enabled")) {
-            prefs.getBoolean("flutter.arc_capybara_filter_enabled", false)
+            prefs.getBoolean("flutter.arc_capybara_filter_enabled", true)
         } else {
-            prefs.getBoolean("arc_capybara_filter_enabled", false)
+            prefs.getBoolean("arc_capybara_filter_enabled", true)
         }
         if (!isFilterEnabled) return
 
-        val threshold = prefs.getFloat("flutter.arc_capybara_filter_threshold", 500.0f).toDouble()
+        val threshold = try {
+            prefs.getFloat("flutter.arc_capybara_filter_threshold", 50.0f).toDouble()
+        } catch (_: Exception) {
+            50.0
+        }
         if (amount < threshold) return
 
-        val now = System.currentTimeMillis()
         if (now - lastPreTxAlertTime < 25_000L && Math.abs(amount - lastPreTxAlertAmount) < 1.0) {
             return // Don't spam alert for same checkout within 25 seconds
         }
@@ -687,9 +787,13 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         lastPreTxAlertAmount = amount
 
         val dreamGoal = prefs.getString("flutter.arc_active_dream_goal", "MacBook Pro M3") ?: "MacBook Pro M3"
-        val remainingGoal = prefs.getFloat("flutter.arc_active_dream_remaining", 120_000.0f).toDouble()
+        val remainingGoal = try {
+            prefs.getFloat("flutter.arc_active_dream_remaining", 120_000.0f).toDouble()
+        } catch (_: Exception) {
+            120_000.0
+        }
 
-        Log.i(TAG, "Triggering Capybara Pre-Transaction Filter for amount:  SOM")
+        Log.i(TAG, "Triggering Capybara Pre-Transaction Filter for amount: $amount SOM")
 
         mainHandler.post {
             showCapybaraOverlay(amount, dreamGoal, remainingGoal)
@@ -771,7 +875,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
             // 3. Amount
             val amountText = TextView(this).apply {
-                text = "Сумма: ${amount.toInt()} сом"
+                text = if (amount > 0.0) "Сумма: ${amount.toInt()} сом" else "Внимание: перевод средств"
                 setTextColor(Color.parseColor("#FF9F0A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 typeface = Typeface.DEFAULT_BOLD
@@ -829,6 +933,8 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 }
                 background = btnBg
                 setOnClickListener {
+                    userBypassedCapybaraTime = System.currentTimeMillis()
+                    userBypassedAmount = amount
                     dismissCapybaraOverlay()
                 }
             }
@@ -1006,17 +1112,20 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 2. Check for explicit neighbor nodes with or without colons: "Получатель", "Кому", "Клиент"
+        // 2. Check for explicit neighbor nodes with or without colons: "Получатель", "Кому", "Клиент", "Оплата по QR"
         for (i in texts.indices) {
             val lower = texts[i].lowercase(Locale.ROOT).trimEnd(':', ' ', '-')
             if (lower == "получатель" || lower == "кому" || lower == "клиент" || lower == "магазин" ||
                 lower == "торговая точка" || lower == "назначение" || lower == "перевод клиенту" ||
-                lower == "перевод на карту" || lower == "фио"
+                lower == "перевод на карту" || lower == "фио" || lower == "продавец" ||
+                lower == "мерчант" || lower == "заведение" || lower == "оплата по qr" || lower == "qr төлөм"
             ) {
                 if (i + 1 < texts.size && texts[i + 1].length > 1) {
                     val rawName = texts[i + 1].trim()
-                    val cat = mapMerchantToCategory(rawName.lowercase(Locale.ROOT))
-                    return Pair(rawName, cat)
+                    if (!rawName.contains("сом", ignoreCase = true) && !rawName.contains("успешно", ignoreCase = true)) {
+                        val cat = mapMerchantToCategory(rawName.lowercase(Locale.ROOT))
+                        return Pair(rawName, cat)
+                    }
                 }
             }
         }
@@ -1135,6 +1244,26 @@ class MBankScreenAccessibilityService : AccessibilityService() {
     private fun extractAmountFromTexts(texts: List<String>, fullCombined: String): Double? {
         val candidates = mutableListOf<Double>()
 
+        // 0. Filter out promo / advertising nodes
+        val cleanTexts = texts.filter { text ->
+            val lower = text.lowercase(Locale.ROOT)
+            !lower.contains("манипол") &&
+            !lower.contains("приз") &&
+            !lower.contains("акци") &&
+            !lower.contains("эксклюзив") &&
+            !lower.contains("рассрочк") &&
+            !lower.contains("ставка") &&
+            !lower.contains("депозит") &&
+            !lower.contains("металл") &&
+            !lower.contains("покупайте") &&
+            !lower.contains("подробнее")
+        }
+
+        fun isBlacklistedAmount(amt: Double): Boolean {
+            return amt == 2845.0 || amt == 6672.0 || amt == 9303.0 ||
+                    amt == 480.0 || amt == 350000.0 || amt == 50000000.0
+        }
+
         // 1. Check full screen combined text with unified BankPatternConfig.AMOUNT_REGEX
         val unifiedMatcher = BankPatternConfig.AMOUNT_REGEX.matcher(fullCombined)
         while (unifiedMatcher.find()) {
@@ -1144,12 +1273,14 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 ?.replace(",", ".") ?: ""
             val parsed = rawNum.toDoubleOrNull()
             if (parsed != null && parsed > 0.0 && parsed < 10_000_000.0) {
-                candidates.add(parsed)
+                if (!isBlacklistedAmount(parsed) && !BankPatternConfig.isLikelyPhoneNumberPrefix(parsed, fullCombined)) {
+                    candidates.add(parsed)
+                }
             }
         }
 
-        // 2. Check each node independently
-        for (text in texts) {
+        // 2. Check each clean node independently
+        for (text in cleanTexts) {
             val m = BankPatternConfig.AMOUNT_REGEX.matcher(text)
             while (m.find()) {
                 val rawNumber = m.group(1)
@@ -1158,24 +1289,33 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                     ?.replace(",", ".") ?: ""
                 val parsedVal = rawNumber.toDoubleOrNull()
                 if (parsedVal != null && parsedVal > 0.0 && parsedVal < 10_000_000.0) {
-                    candidates.add(parsedVal)
+                    if (!isBlacklistedAmount(parsedVal) &&
+                        !BankPatternConfig.isLikelyPhoneNumberPrefix(parsedVal, text) &&
+                        !BankPatternConfig.isLikelyPhoneNumberPrefix(parsedVal, fullCombined)) {
+                        candidates.add(parsedVal)
+                    }
                 }
             }
         }
 
         // 3. Proximity check across up to 3 neighboring nodes (for custom Compose/Flutter banking views)
-        val currencyMarkers = listOf("сом", "kgs", "kzt", "rub", "usd", "eur", "c", "с")
-        for (i in texts.indices) {
-            val item = texts[i]
+        val currencyMarkers = listOf("сом", "kgs", "kzt", "rub", "usd", "eur", "c", "с", "⃀", "\u20C0")
+        for (i in cleanTexts.indices) {
+            val item = cleanTexts[i]
             val cleaned = item.replace(" ", "").replace("\u00A0", "").replace(",", ".")
             val num = cleaned.toDoubleOrNull()
             if (num != null && num > 0.0 && num < 10_000_000.0) {
                 val isYear = num in 2020.0..2030.0
+                if (isYear || isBlacklistedAmount(num)) continue
+                if (BankPatternConfig.isLikelyPhoneNumberPrefix(num, fullCombined) ||
+                    BankPatternConfig.isLikelyPhoneNumberPrefix(num, item)) {
+                    continue
+                }
 
                 var hasNearbyCurrency = false
                 for (offset in 1..3) {
-                    if (i + offset < texts.size) {
-                        val ahead = texts[i + offset].lowercase(Locale.ROOT)
+                    if (i + offset < cleanTexts.size) {
+                        val ahead = cleanTexts[i + offset].lowercase(Locale.ROOT)
                         if (currencyMarkers.any { ahead.contains(it) } || ahead == "c" || ahead == "с" || ahead.startsWith("c.") || ahead.startsWith("с.")) {
                             hasNearbyCurrency = true
                             break
@@ -1186,7 +1326,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 var hasNearbyMarker = false
                 for (offset in 1..3) {
                     if (i - offset >= 0) {
-                        val behind = texts[i - offset].lowercase(Locale.ROOT)
+                        val behind = cleanTexts[i - offset].lowercase(Locale.ROOT)
                         if (behind.contains("сумма") || behind.contains("итог") || behind.contains("к оплате") ||
                             behind.contains("перевод") || behind.contains("списано") || behind.contains("оплачено") ||
                             behind.contains("отправлено") || behind.contains("переведено")
@@ -1230,117 +1370,240 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         return null
     }
 
+    private fun extractTransferInputAmount(texts: List<String>, fullCombined: String): Double? {
+        // 1. Look for number directly adjacent to "сумма" or "сумма перевода"
+        for (i in texts.indices) {
+            val text = texts[i].lowercase(Locale.ROOT).trim()
+            if (text == "сумма" || text.startsWith("сумма:") || text == "сумма перевода" || text == "введите сумму") {
+                // Check next 2 nodes or previous node
+                for (offset in listOf(1, 2, -1)) {
+                    val targetIdx = i + offset
+                    if (targetIdx in texts.indices) {
+                        val candidate = texts[targetIdx].trim()
+                        val amt = parseStrictTransferAmount(candidate)
+                        if (amt != null && amt > 0.0) {
+                            return amt
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Proximity to currency on the transfer screen (excluding the user's card balance)
+        for (i in texts.indices) {
+            val text = texts[i].trim()
+            val lower = text.lowercase(Locale.ROOT)
+            // Exclude balance node (often preceded by "доступно", "баланс", "карт-счет")
+            val prev = if (i > 0) texts[i - 1].lowercase(Locale.ROOT) else ""
+            if (prev.contains("баланс") || prev.contains("доступно") || prev.contains("остаток") || prev.contains("комиссия")) {
+                continue
+            }
+            if (lower.contains("сом") || lower.endsWith(" с") || lower.endsWith(" c") || lower.contains("⃀") || lower.contains("\u20C0")) {
+                val amt = parseStrictTransferAmount(text)
+                if (amt != null && amt > 0.0) {
+                    return amt
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun parseStrictTransferAmount(str: String): Double? {
+        val trimmed = str.trim()
+        val lower = trimmed.lowercase(Locale.ROOT)
+        // Отсекаем рекламные карточки и акции
+        if (lower.contains("манипол") || lower.contains("приз") || lower.contains("акци") ||
+            lower.contains("эксклюзив") || lower.contains("рассрочк") || lower.contains("ставка") ||
+            lower.contains("депозит") || lower.contains("металл") || lower.contains("покупайте") ||
+            lower.contains("подробнее")) {
+            return null
+        }
+        // Reject phone numbers, card numbers, years
+        if (trimmed.length > 8 && (trimmed.startsWith("+996") || trimmed.startsWith("0") || trimmed.startsWith("996"))) return null
+        if (trimmed.matches(Regex("""^\d{4}$"""))) return null // Reject pure 4-digit card ending
+        val cleaned = trimmed.replace(" ", "")
+            .replace("\u00A0", "")
+            .replace("\u20C0", "")
+            .replace("⃀", "")
+            .replace("сом", "", ignoreCase = true)
+            .replace("kgs", "", ignoreCase = true)
+            .replace("с", "", ignoreCase = true)
+            .replace("c", "", ignoreCase = true)
+            .replace(",", ".")
+            .trim()
+        val m = Pattern.compile("""(\d+(?:\.\d{1,2})?)""").matcher(cleaned)
+        if (m.find()) {
+            val v = m.group(1)?.toDoubleOrNull()
+            if (v != null && v > 0.0 && v < 10_000_000.0) {
+                if (v in 2024.0..2030.0 && !str.contains("сом", ignoreCase = true) && !str.contains("⃀")) return null
+                if (v == 2845.0 || v == 6672.0 || v == 9303.0 || v == 480.0 || v == 350000.0 || v == 50000000.0) return null
+                return v
+            }
+        }
+        return null
+    }
+
     private fun extractCardBalanceFromTexts(texts: List<String>, fullCombined: String): Double? {
-        fun parseAmount(str: String): Double? {
-            val cleaned = str.replace(" ", "")
-                .replace("\u00A0", "")
-                .replace("\u20C0", "")
-                .replace("⃀", "")
-                .replace("сом", "", ignoreCase = true)
-                .replace("kgs", "", ignoreCase = true)
-                .replace("с", "", ignoreCase = true)
-                .replace("c", "", ignoreCase = true)
-                .replace(",", ".")
-                .trim()
-            val m = Pattern.compile("""(\d+(?:\.\d{1,2})?)""").matcher(cleaned)
-            if (m.find()) {
-                val v = m.group(1)?.toDoubleOrNull()
-                if (v != null && v > 0.0 && v < 100_000_000.0) {
+        fun normalizeSpaces(s: String): String {
+            return s.replace(Regex("""[\u00A0\u202F\u2007\u2008\u2009\u200A\uFEFF]"""), " ").trim()
+        }
+
+        fun parseCardBalanceCandidate(str: String): Double? {
+            val trimmed = normalizeSpaces(str)
+            val lower = trimmed.lowercase(Locale.ROOT)
+
+            // 1. Blacklist check: brand names, promos, expenses, metals, loans
+            if (lower.contains("visa") || lower.contains("mastercard") ||
+                lower.contains("элкарт") || lower.contains("elkart") ||
+                lower.contains("манипол") || lower.contains("приз") ||
+                lower.contains("акци") || lower.contains("рассрочк") ||
+                lower.contains("ставка") || lower.contains("депозит") ||
+                lower.contains("кредит") || lower.contains("металл") ||
+                lower.contains("за ") || lower.contains("ноябр") ||
+                lower.contains("декабр") || lower.contains("январ") ||
+                lower.contains("расход") || lower.contains("трат") ||
+                lower.contains("подробнее") || lower.contains("покупайте")
+            ) {
+                return null
+            }
+
+            // 2. Reject ANY card/account number:
+            // e.g. "*2845", "*6672", "103***6672", "••9303", "••6672", "2845", "6672", "9303"
+            if (trimmed.startsWith("*") || trimmed.startsWith("••") || trimmed.startsWith("..") ||
+                trimmed.startsWith("**") || trimmed.contains("***") || trimmed.matches(Regex("""^\d{4}$"""))
+            ) {
+                return null
+            }
+
+            // 3. Monetary balance with decimal part (e.g. "5 190,66 C", "3 477,66 ⃀", "3 477,66", "1,20 C", "1,20", "5190.66")
+            val pDec = Pattern.compile(
+                """([0-9]{1,3}(?:[ ][0-9]{3})*|[0-9]+)(?:[,\.]([0-9]{1,2}))\s*(?:[⃀\u20C0CcСс]|сом|kgs)?""",
+                Pattern.CASE_INSENSITIVE
+            )
+            val mDec = pDec.matcher(trimmed)
+            if (mDec.find()) {
+                val intPart = mDec.group(1)?.replace(" ", "") ?: ""
+                val decPart = mDec.group(2) ?: "00"
+                val v = "$intPart.$decPart".toDoubleOrNull()
+                if (v != null && v >= 0.0 && v < 100_000_000.0) {
+                    if (v == 2845.0 || v == 6672.0 || v == 9303.0 || v == 480.0 || v == 350000.0 || v == 50000000.0) {
+                        return null
+                    }
                     return v
                 }
             }
+
+            // 4. Whole monetary amount with mandatory currency symbol (e.g. "5 190 C", "3 477 ⃀", "12 500 сом")
+            val pWhole = Pattern.compile(
+                """([0-9]{1,3}(?:[ ][0-9]{3})*|[0-9]+)\s*(?:[⃀\u20C0CcСс]|сом|kgs)""",
+                Pattern.CASE_INSENSITIVE
+            )
+            val mWhole = pWhole.matcher(trimmed)
+            if (mWhole.find()) {
+                val intPart = mWhole.group(1)?.replace(" ", "") ?: ""
+                val v = intPart.toDoubleOrNull()
+                if (v != null && v >= 0.0 && v < 100_000_000.0) {
+                    if (v == 2845.0 || v == 6672.0 || v == 9303.0 || v == 480.0 || v == 350000.0 || v == 50000000.0) {
+                        return null
+                    }
+                    return v
+                }
+            }
+
             return null
         }
 
         // =========================================================================
-        // ПРИОРИТЕТ 1: MBank Карт-виджет: маскированная карта (••9303, ••****, ..9303)
-        // В MBank баланс карты ВСЕГДА находится прямо под или над номером карты (••9303)!
+        // ПРИОРИТЕТ 1: MBank Карт-виджет: Основная карта (••9303 ⭐, ••6672)
+        // В MBank основная карта всегда помечена звездой ⭐ и находится вверху списка!
         // =========================================================================
         val maskedCardPattern = Pattern.compile("""[•\*\.\u2022]{2,4}\s*(\d{4})""")
+        val detectedCards = mutableListOf<Pair<String, Double>>()
+
         for (i in texts.indices) {
             val text = texts[i].trim()
             if (maskedCardPattern.matcher(text).find() || text.startsWith("••") || text.startsWith("..") || text.startsWith("**")) {
-                // Search nearby nodes (1-3 steps ahead or behind) for the card balance!
-                for (offset in listOf(1, 2, -1, 3)) {
+                for (offset in listOf(1, 2, -1, 3, 4, -2)) {
                     val targetIdx = i + offset
                     if (targetIdx in texts.indices) {
                         val candidateText = texts[targetIdx].trim()
-                        val amt = parseAmount(candidateText)
-                        if (amt != null && amt > 10.0) {
-                            Log.i(TAG, "Scraped card balance via masked card [$text]: $amt (from '$candidateText')")
-                            return amt
+
+                        // A. Одиночный узел
+                        var amt = parseCardBalanceCandidate(candidateText)
+
+                        // B. Объединение 2 соседних узлов (на случай если дробная часть/валюта в отдельном Text)
+                        if (amt == null && targetIdx + 1 in texts.indices) {
+                            val nextText = texts[targetIdx + 1].trim()
+                            amt = parseCardBalanceCandidate("$candidateText $nextText")
+                        }
+
+                        // C. Объединение 3 соседних узлов ("5 190," + "66" + "C")
+                        if (amt == null && targetIdx + 2 in texts.indices) {
+                            val next1 = texts[targetIdx + 1].trim()
+                            val next2 = texts[targetIdx + 2].trim()
+                            amt = parseCardBalanceCandidate("$candidateText $next1 $next2")
+                        }
+
+                        if (amt != null && amt >= 0.0) {
+                            detectedCards.add(Pair(text, amt))
+                            break
                         }
                     }
                 }
             }
         }
 
+        // Если нашли карты: ищем в первую очередь основную карту (••9303 с золотой звездой),
+        // либо берем баланс первой карты в списке (основной счет в MBank)
+        if (detectedCards.isNotEmpty()) {
+            val primaryCard = detectedCards.find { it.first.contains("9303") } ?: detectedCards.first()
+            Log.i(TAG, "Authoritative primary card balance selected [${primaryCard.first}]: ${primaryCard.second}")
+            return primaryCard.second
+        }
+
         // =========================================================================
-        // ПРИОРИТЕТ 2: Карточный бренд (VISA, Mastercard, Элкарт, 2845)
-        // Под балансом находится мини-изображение карты с брендом (например MBank 2845 VISA)
+        // ПРИОРИТЕТ 2: Сканирование всех узлов с валютой ⃀ (\u20C0), сом или с
+        // Отсекаем блоки трат ("За Ноябрь", "Маниполия", "Кэшбэк", "350 000 призов")
         // =========================================================================
+        val currencyBalances = mutableListOf<Double>()
         for (i in texts.indices) {
-            val lower = texts[i].lowercase(Locale.ROOT).trim()
-            if (lower.contains("visa") || lower.contains("mastercard") || lower.contains("элкарт") || lower.contains("elkart")) {
-                for (offset in listOf(-1, -2, 1)) {
-                    val targetIdx = i + offset
-                    if (targetIdx in texts.indices) {
-                        val candidateText = texts[targetIdx].trim()
-                        val amt = parseAmount(candidateText)
-                        if (amt != null && amt > 10.0) {
-                            Log.i(TAG, "Scraped card balance via card brand [$lower]: $amt (from '$candidateText')")
-                            return amt
-                        }
-                    }
-                }
+            val text = texts[i].trim()
+            val prev = if (i > 0) texts[i - 1].lowercase(Locale.ROOT) else ""
+            if (prev.contains("за ") || prev.contains("ноябр") || prev.contains("декабр") || prev.contains("январ") ||
+                prev.contains("расход") || prev.contains("трат") || prev.contains("манипол") || prev.contains("приз")) {
+                continue
+            }
+            val amt = parseCardBalanceCandidate(text)
+            if (amt != null && amt >= 0.0) {
+                currencyBalances.add(amt)
             }
         }
 
+        if (currencyBalances.isNotEmpty()) {
+            // Если на экране несколько сумм, берем первую (основную карту)
+            val selected = currencyBalances.first()
+            Log.i(TAG, "Scraped card balance via currency token: $selected")
+            return selected
+        }
+
         // =========================================================================
-        // ПРИОРИТЕТ 3: Соседние узлы со словами-якорями (баланс, карт-счет, доступно, эсеп, калдык)
+        // ПРИОРИТЕТ 3: Соседние узлы со словами-якорями (карт-счет, доступно, эсеп, калдык)
         // =========================================================================
-        val anchorWords = listOf(
-            "баланс", "доступно", "остаток", "карт-счет", "карт счет", "карта",
-            "карталар", "эсеп", "калдык", "mbank", "дебетовая", "мой банк"
-        )
+        val anchorWords = listOf("карт-счет", "карт счет", "доступно", "эсеп", "калдык", "мой банк", "дебетовая")
         for (i in texts.indices) {
             val lower = texts[i].lowercase(Locale.ROOT).trim()
             if (anchorWords.any { lower == it || lower.startsWith("$it:") || lower.contains(it) }) {
-                for (offset in 1..3) {
-                    if (i + offset < texts.size) {
-                        val candidateText = texts[i + offset].trim()
-                        // Ignore spending label (e.g. "За Ноябрь")
-                        if (candidateText.lowercase(Locale.ROOT).contains("за ") || candidateText.lowercase(Locale.ROOT).contains("расход")) {
-                            continue
-                        }
-                        val amt = parseAmount(candidateText)
-                        if (amt != null && amt > 10.0) {
+                for (offset in listOf(1, 2, 3, -1)) {
+                    val targetIdx = i + offset
+                    if (targetIdx in texts.indices) {
+                        val candidateText = texts[targetIdx].trim()
+                        val amt = parseCardBalanceCandidate(candidateText)
+                        if (amt != null && amt >= 0.0) {
                             Log.i(TAG, "Scraped card balance via anchor [$lower]: $amt (from '$candidateText')")
                             return amt
                         }
                     }
-                }
-            }
-        }
-
-        // =========================================================================
-        // ПРИОРИТЕТ 4: Сканирование всех узлов с валютой ⃀ (\u20C0), сом или с
-        // Отсекаем блоки трат ("За Ноябрь", "Маниполия", "Кэшбэк")
-        // =========================================================================
-        for (i in texts.indices) {
-            val text = texts[i].trim()
-            // Check if text has currency symbol (⃀, \u20C0, сом, с, c)
-            val hasCurrency = text.contains("\u20C0") || text.contains("⃀") || text.contains("сом", ignoreCase = true) || text.endsWith(" с", ignoreCase = true) || text.endsWith(" c", ignoreCase = true)
-            if (hasCurrency) {
-                // If previous node was a spending tracker ("За Ноябрь", "За месяц", "Расходы", "Маниполия"), skip it!
-                val prev = if (i > 0) texts[i - 1].lowercase(Locale.ROOT) else ""
-                if (prev.contains("за ") || prev.contains("ноябр") || prev.contains("декабр") || prev.contains("расход") || prev.contains("трат") || prev.contains("манипол")) {
-                    continue
-                }
-                val amt = parseAmount(text)
-                if (amt != null && amt > 10.0 && amt != 480.0 && amt != 350000.0 && amt != 50000000.0) {
-                    Log.i(TAG, "Scraped card balance via currency token: $amt (from '$text')")
-                    return amt
                 }
             }
         }
@@ -1467,7 +1730,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         } else if (prefs.contains("arc_floating_capy_enabled")) {
             prefs.getBoolean("arc_floating_capy_enabled", false)
         } else {
-            true // По умолчанию включено, чтобы плавающая капибара всегда помогала
+            false // Disabled by default per user request to keep banking UI clean
         }
         if (!isEnabled) {
             if (floatingBubbleView != null) {
@@ -1915,6 +2178,12 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         }
         if (!isEnabled) return false
 
+        // Check if user snoozed the blocker
+        val snoozeUntil = prefs.getLong("arc_social_blocker_snooze_until", 0L)
+        if (System.currentTimeMillis() < snoozeUntil) {
+            return false // Currently snoozed!
+        }
+
         val mode = prefs.getString("flutter.arc_social_blocker_mode", null)
             ?: prefs.getString("arc_social_blocker_mode", "always") ?: "always"
         if (mode == "always") return true
@@ -1946,7 +2215,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
         if (now - lastSocialBlockTimestamp < 1500) return
         lastSocialBlockTimestamp = now
 
-        // Present the Capybara Dictator fullscreen blocker overlay directly over the social media app
+        // Present the Capybara fullscreen blocker overlay window directly over the social media app
         mainHandler.post {
             showSocialBlockerOverlay(pkg)
         }
@@ -1960,24 +2229,13 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val dreamGoal = prefs.getString("flutter.arc_blocker_dream_goal", null)
                 ?: prefs.getString("arc_blocker_dream_goal", null)
-                ?: "MacBook Pro M3"
-            val pullups = prefs.getInt("flutter.arc_blocker_pullups_required", 20)
+                ?: "Свою цель"
             val appName = getReadableSocialAppName(pkg)
 
-            // Prominent Heads-up Toast Warning
-            try {
-                Toast.makeText(
-                    applicationContext,
-                    "⚠️ Капибара-Диктатор: Доступ к $appName заблокирован!",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (_: Exception) {}
-
             val rootLayout = FrameLayout(this).apply {
-                setBackgroundColor(Color.parseColor("#F50A0A0C")) // Heavy dark backdrop completely covering app
+                setBackgroundColor(Color.parseColor("#B30A0A0C")) // Semi-transparent scrim
                 setOnClickListener {
-                    dismissSocialBlockerOverlay()
-                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    dismissSocialBlockerOverlay() // Clicking outside dismisses overlay without closing app
                 }
             }
 
@@ -1986,7 +2244,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 val bg = GradientDrawable().apply {
                     setColor(Color.parseColor("#151518"))
                     cornerRadius = dpToPx(24).toFloat()
-                    setStroke(dpToPx(2f), Color.parseColor("#FF453A")) // Dictator Crimson Red Border
+                    setStroke(dpToPx(1.8f), Color.parseColor("#FF9F0A")) // Amber border
                 }
                 background = bg
                 setPadding(dpToPx(22), dpToPx(22), dpToPx(22), dpToPx(22))
@@ -2002,52 +2260,52 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             rootLayout.addView(card, cardParams)
 
-            // 0. Capybara Dictator Avatar
+            // 0. Capybara Avatar
             val avatarContainer = FrameLayout(this).apply {
                 val aBg = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#26FF453A"))
-                    setStroke(dpToPx(2f), Color.parseColor("#FF453A"))
+                    setColor(Color.parseColor("#26FF9F0A"))
+                    setStroke(dpToPx(2f), Color.parseColor("#FF9F0A"))
                 }
                 background = aBg
                 elevation = dpToPx(8).toFloat()
             }
             val capyIcon = TextView(this).apply {
                 text = "ARC"
-                setTextColor(Color.parseColor("#FF453A"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                setTextColor(Color.parseColor("#FF9F0A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
             avatarContainer.addView(capyIcon, FrameLayout.LayoutParams(
-                dpToPx(64),
-                dpToPx(64)
+                dpToPx(56),
+                dpToPx(56)
             ).apply {
                 gravity = Gravity.CENTER
             })
             card.addView(avatarContainer, LinearLayout.LayoutParams(
-                dpToPx(64),
-                dpToPx(64)
+                dpToPx(56),
+                dpToPx(56)
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = dpToPx(12)
+                bottomMargin = dpToPx(10)
             })
 
-            // 1. Dictator Badge
+            // 1. Badge
             val badgeLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 val badgeBg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#26FF453A"))
+                    setColor(Color.parseColor("#26FF9F0A"))
                     cornerRadius = dpToPx(8).toFloat()
-                    setStroke(dpToPx(1f), Color.parseColor("#FF453A"))
+                    setStroke(dpToPx(1f), Color.parseColor("#FF9F0A"))
                 }
                 background = badgeBg
                 setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
             }
             val badgeText = TextView(this).apply {
-                text = "WINTER ARC DICTATOR • СТРОГИЙ РЕЖИМ"
-                setTextColor(Color.parseColor("#FF453A"))
+                text = "КАПИБАРА • КОНТРОЛЬ ВРЕМЕНИ"
+                setTextColor(Color.parseColor("#FF9F0A"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                 typeface = Typeface.DEFAULT_BOLD
                 letterSpacing = 0.05f
@@ -2063,9 +2321,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
             // 2. Title
             val titleText = TextView(this).apply {
-                text = "ЛИМИТ ТРАТ ИСЧЕРПАН!\n$appName ЗАБЛОКИРОВАН"
+                text = "Открыт $appName\nВремя для отдыха или цели?"
                 setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
             }
@@ -2076,9 +2334,9 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 bottomMargin = dpToPx(10)
             })
 
-            // 3. Strict Mode Message (Direct response to user complaint)
+            // 3. Body
             val bodyText = TextView(this).apply {
-                text = "В обычных приложениях можно продлить на 15–20 минут, но здесь строгий режим Winter Arc — никаких отмен и продлений!\n\nДоступ закрыт намертво, пока приложение не удалишь или не сделаешь $pullups подтягиваний (или 50 отжиманий) в ARC Finance."
+                text = "Капибара напоминает: время бесценно, а впереди цель «$dreamGoal». Выберите, продолжить просмотр или закрыть приложение."
                 setTextColor(Color.parseColor("#D1D1D6"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
                 gravity = Gravity.CENTER
@@ -2091,73 +2349,73 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 bottomMargin = dpToPx(14)
             })
 
-            // 4. Goal Motivation Box
-            val goalBox = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                val gbg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1C1C1E"))
-                    cornerRadius = dpToPx(12).toFloat()
-                    setStroke(dpToPx(1f), Color.parseColor("#FF9F0A"))
-                }
-                background = gbg
-                setPadding(dpToPx(12), dpToPx(10), dpToPx(12), dpToPx(10))
-            }
-            val goalText = TextView(this).apply {
-                text = "Цель: $dreamGoal\nСохраняйте финансовую дисциплину"
-                setTextColor(Color.parseColor("#FF9F0A"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-                typeface = Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-            }
-            goalBox.addView(goalText)
-            card.addView(goalBox, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dpToPx(18)
-            })
-
-            // 5. Workout Unlock Button
-            val unlockBtn = Button(this).apply {
-                text = "ВЫПОЛНИТЬ $pullups ПОДТЯГИВАНИЙ В ARC"
+            // 4. Primary Action: ПРОДОЛЖИТЬ ПРОСМОТР (15 МИН)
+            val snoozeBtn = Button(this).apply {
+                text = "ПРОДОЛЖИТЬ ПРОСМОТР (15 МИН)"
                 setTextColor(Color.BLACK)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 typeface = Typeface.DEFAULT_BOLD
                 val btnBg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#FF453A"))
+                    setColor(Color.parseColor("#30D158")) // Green
                     cornerRadius = dpToPx(12).toFloat()
                 }
                 background = btnBg
                 setOnClickListener {
                     dismissSocialBlockerOverlay()
+                    val snoozeMs = System.currentTimeMillis() + (15 * 60 * 1000L)
+                    prefs.edit().putLong("arc_social_blocker_snooze_until", snoozeMs).apply()
                     try {
-                        val arcIntent = Intent(this@MBankScreenAccessibilityService, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                            putExtra("quick_action", "workout_penalty")
-                        }
-                        startActivity(arcIntent)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error launching ARC Finance: ${e.message}")
-                    }
+                        Toast.makeText(applicationContext, "Приятного просмотра! Пауза на 15 минут", Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {}
                 }
             }
-            card.addView(unlockBtn, LinearLayout.LayoutParams(
+            card.addView(snoozeBtn, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(46)
+                dpToPx(44)
             ).apply {
-                bottomMargin = dpToPx(10)
+                bottomMargin = dpToPx(8)
             })
 
-            // 6. Dismiss & Go to Home Screen Button (Exits the blocked social app)
+            // 5. Action: ОТКЛЮЧИТЬ БЛОКИРАТОР
+            val disableBtn = Button(this).apply {
+                text = "ОТКЛЮЧИТЬ БЛОКИРАТОР"
+                setTextColor(Color.parseColor("#FF9F0A"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                typeface = Typeface.DEFAULT_BOLD
+                val dBg = GradientDrawable().apply {
+                    setColor(Color.parseColor("#242426"))
+                    cornerRadius = dpToPx(10).toFloat()
+                    setStroke(dpToPx(1f), Color.parseColor("#FF9F0A"))
+                }
+                background = dBg
+                setOnClickListener {
+                    dismissSocialBlockerOverlay()
+                    prefs.edit()
+                        .putBoolean("arc_social_blocker_enabled", false)
+                        .putBoolean("flutter.arc_social_blocker_enabled", false)
+                        .putBoolean("arc_social_blocker_active", false)
+                        .putBoolean("flutter.arc_social_blocker_active", false)
+                        .apply()
+                    try {
+                        Toast.makeText(applicationContext, "Блокиратор приложений отключен", Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {}
+                }
+            }
+            card.addView(disableBtn, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(40)
+            ).apply {
+                bottomMargin = dpToPx(8)
+            })
+
+            // 6. Action: ЗАКРЫТЬ $appName
             val closeBtn = Button(this).apply {
-                text = "ЗАКРЫТЬ $appName И ВЫЙТИ"
-                setTextColor(Color.parseColor("#EBEBF5"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                text = "ЗАКРЫТЬ $appName"
+                setTextColor(Color.parseColor("#8E8E93"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
                 typeface = Typeface.DEFAULT_BOLD
                 val cBg = GradientDrawable().apply {
-                    setColor(Color.parseColor("#2C2C2E"))
-                    cornerRadius = dpToPx(10).toFloat()
-                    setStroke(dpToPx(1f), Color.parseColor("#3A3A3C"))
+                    setColor(Color.TRANSPARENT)
                 }
                 background = cBg
                 setOnClickListener {
@@ -2167,7 +2425,7 @@ class MBankScreenAccessibilityService : AccessibilityService() {
             }
             card.addView(closeBtn, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(40)
+                dpToPx(36)
             ))
 
             val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
@@ -2205,20 +2463,18 @@ class MBankScreenAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // GUARANTEED ZERO-FAIL FALLBACK:
-            // If overlay view could not be attached (e.g. strict OEM overlay restrictions on Vivo, Xiaomi, Android 12+),
-            // immediately force exit to Home Screen and post a high-priority warning notification!
+            // If overlay view could not be attached (strict OEM restriction on Vivo/Xiaomi),
+            // show a polite Toast instead of abruptly kicking the user to home screen!
             if (socialBlockerOverlayView == null) {
-                Log.w(TAG, "Overlay blocked by OS. Executing fallback HOME action + warning notification.")
-                performGlobalAction(GLOBAL_ACTION_HOME)
-                postSocialBlockerWarningNotification(appName, pullups)
+                Log.w(TAG, "Overlay blocked by OS. Showing warning toast without closing app.")
+                try {
+                    Toast.makeText(applicationContext, "Капибара: открыт $appName. Помни о цели на $dreamGoal!", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {}
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error showing social blocker overlay: ${e.message}")
             try {
-                val appName = getReadableSocialAppName(pkg)
-                performGlobalAction(GLOBAL_ACTION_HOME)
-                postSocialBlockerWarningNotification(appName, 20)
+                Toast.makeText(applicationContext, "Капибара: не забывай о финансовых целях!", Toast.LENGTH_SHORT).show()
             } catch (_: Exception) {}
         }
     }

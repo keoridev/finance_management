@@ -45,7 +45,7 @@ class FinanceController extends ChangeNotifier {
   int _smartRoundUpStep = 100;
   double? _lastRoundUpAmount;
   String? _lastRoundUpGoalTitle;
-  bool _capybaraFilterEnabled = false;
+  bool _capybaraFilterEnabled = true;
   bool _floatingCapyEnabled = false;
   bool _capybaraWidgetEnabled = true;
   WorkoutPenalty? _activeWorkoutPenalty;
@@ -1405,7 +1405,7 @@ class FinanceController extends ChangeNotifier {
           prefs.getBool('rounding_enabled') ??
           false;
       _smartRoundUpStep = prefs.getInt('arc_smart_round_up_step') ?? 100;
-      _capybaraFilterEnabled = prefs.getBool('arc_capybara_filter_enabled') ?? false;
+      _capybaraFilterEnabled = prefs.getBool('arc_capybara_filter_enabled') ?? true;
       _floatingCapyEnabled = prefs.getBool('arc_floating_capy_enabled') ?? false;
       _capybaraWidgetEnabled = prefs.getBool('arc_capybara_widget_enabled') ?? true;
     } catch (_) {}
@@ -1481,8 +1481,8 @@ class FinanceController extends ChangeNotifier {
     }
 
     // Игнорируем нулевые или ошибочные суммы из истории/экрана
-    if (amount <= 0) {
-      debugPrint('[FinanceController] Skipped zero-amount bank notification: $title');
+    if (amount <= 0 || amount == 350000.0 || amount == 50000000.0 || amount == 480.0) {
+      debugPrint('[FinanceController] Skipped invalid amount bank notification: $title ($amount сом)');
       if (balanceAfter != null && balanceAfter > 0 && mbankIndex != -1) {
         _accounts[mbankIndex] = _accounts[mbankIndex].copyWith(balance: balanceAfter);
         _saveToStorage();
@@ -1557,6 +1557,9 @@ class FinanceController extends ChangeNotifier {
   bool updateScrapedBankBalance(String bankName, double newBalance) {
     if (!_isStorageLoaded) return false;
     if (newBalance <= 0) return false;
+    // Safety guard against card ending numbers mistakenly passed as balance
+    if (newBalance == 2845.0 || newBalance == 6672.0 || newBalance == 9303.0 ||
+        newBalance == 350000.0 || newBalance == 50000000.0 || newBalance == 480.0) return false;
     final lower = bankName.toLowerCase();
     int idx = _accounts.indexWhere((a) => a.bankName.toLowerCase().contains(lower));
     if (idx == -1 && lower.contains('mbank')) {
@@ -1627,7 +1630,7 @@ class FinanceController extends ChangeNotifier {
             : 120000.0;
         WidgetLaunchService.syncCapybaraFilterConfig(
           enabled: _capybaraFilterEnabled,
-          threshold: 500.0,
+          threshold: 50.0,
           dreamGoal: dreamGoal,
           remainingGoal: remaining,
         );

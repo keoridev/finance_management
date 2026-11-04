@@ -7,6 +7,7 @@ import '../models/transaction_type.dart';
 import '../theme/app_colors.dart';
 import '../utils/formatters.dart';
 import 'glass_container.dart';
+import 'receipt_detail_modal.dart';
 
 class TransactionTile extends StatelessWidget {
   final Transaction transaction;
@@ -14,6 +15,7 @@ class TransactionTile extends StatelessWidget {
   final Account? account;
   final VoidCallback? onDelete;
   final VoidCallback? onDuplicate;
+  final VoidCallback? onTap;
 
   const TransactionTile({
     super.key,
@@ -22,6 +24,7 @@ class TransactionTile extends StatelessWidget {
     required this.account,
     this.onDelete,
     this.onDuplicate,
+    this.onTap,
   });
 
   @override
@@ -121,7 +124,21 @@ class TransactionTile extends StatelessWidget {
           ],
         ),
       ),
-      child: GlassContainer(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (onTap != null) {
+            onTap!();
+          } else {
+            ReceiptDetailModal.show(
+              context,
+              transaction: transaction,
+              category: category,
+              account: account,
+            );
+          }
+        },
+        child: GlassContainer(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         borderRadius: BorderRadius.circular(16),
         surfaceColor: const Color(0xFF1C1C1E).withValues(alpha: 0.55),
@@ -224,6 +241,7 @@ class TransactionTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

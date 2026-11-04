@@ -564,12 +564,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       return;
     }
 
+    final bool isQr = parsed.title.toLowerCase().contains('qr') ||
+        fullText.toLowerCase().contains('qr') ||
+        raw['rawText']?.toString().toLowerCase().contains('qr') == true;
+
+    final formattedNote = isQr
+        ? 'Оплата по QR • MBank • ${parsed.title}'
+        : (isScreen ? 'Чек с экрана: $fullText' : 'Пуш банка: $fullText');
+
     widget.controller.addMBankAutoTransaction(
       title: parsed.title,
       amount: parsed.amount,
       type: parsed.type,
       categoryId: parsed.categoryId,
-      note: isScreen ? 'Чек с экрана: $fullText' : 'Пуш банка: $fullText',
+      note: formattedNote,
       balanceAfter: parsed.balanceAfter,
     );
 

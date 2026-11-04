@@ -84,6 +84,20 @@ class MBankParserService {
     unicode: true,
   );
 
+  static bool _isLikelyPhoneNumberPrefix(double amt, String text) {
+    if (amt == 996.0) {
+      final lower = text.toLowerCase();
+      if (lower.contains('+996') || lower.contains('996 7') || lower.contains('996 5') ||
+          lower.contains('996 9') || lower.contains('996 2') || lower.contains('9967') ||
+          lower.contains('9965') || lower.contains('9969') || lower.contains('9962') ||
+          lower.contains('номер') || lower.contains('телефон') || lower.contains('тел:') ||
+          lower.contains('тел ') || lower.contains('+ 996')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Parse any incoming text from MBank Push Notification, SMS, or Accessibility Screen
   static ParsedMBankNotification? parse(String text) {
     if (text.trim().isEmpty) return null;
@@ -173,7 +187,7 @@ class MBankParserService {
               .replaceAll('\u00A0', '')
               .replaceAll(',', '.');
           final val = double.tryParse(cleaned);
-          if (val != null && val > 0) {
+          if (val != null && val > 0 && !_isLikelyPhoneNumberPrefix(val, text)) {
             amount = val;
             rawAmountStr = cand;
           }
@@ -200,7 +214,7 @@ class MBankParserService {
             .replaceAll('\u00A0', '')
             .replaceAll(',', '.');
         final val = double.tryParse(cleaned);
-        if (val != null && val > 0) {
+        if (val != null && val > 0 && !_isLikelyPhoneNumberPrefix(val, text)) {
           amount = val;
           rawAmountStr = cand;
           break;
