@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 import '../utils/formatters.dart';
-import 'glass_container.dart';
 
 class TransactionSuccessOverlay {
   TransactionSuccessOverlay._();
