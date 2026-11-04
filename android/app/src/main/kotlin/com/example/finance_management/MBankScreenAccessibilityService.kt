@@ -1,4 +1,4 @@
-package com.example.finance_management
+﻿package com.example.finance_management
 
 import android.accessibilityservice.AccessibilityService
 import android.app.AlarmManager
@@ -1298,31 +1298,35 @@ class MBankScreenAccessibilityService : AccessibilityService() {
 
         // =========================================================================
         // ПРИОРИТЕТ 3: Соседние узлы со словами-якорями (баланс, карт-счет, доступно, эсеп, калдык)
+        // ВАЖНО: якоря баланса должны быть СТРОГИМИ, а не общими ("мой банк", "mbank" - это название шапки, а не баланс!)
         // =========================================================================
         val anchorWords = listOf(
-            "баланс", "доступно", "остаток", "карт-счет", "карт счет", "карта",
-            "карталар", "эсеп", "калдык", "mbank", "дебетовая", "мой банк"
+            "баланс", "доступно", "остаток", "карт-счет", "карт счет",
+            "эсеп", "калдык"
         )
         for (i in texts.indices) {
             val lower = texts[i].lowercase(Locale.ROOT).trim()
-            if (anchorWords.any { lower == it || lower.startsWith("$it:") || lower.contains(it) }) {
+            if (anchorWords.any { lower == it || lower.startsWith(it + ":") || lower.startsWith(it + " ") }) {
                 for (offset in 1..3) {
                     if (i + offset < texts.size) {
                         val candidateText = texts[i + offset].trim()
-                        // Ignore spending label (e.g. "За Ноябрь")
-                        if (candidateText.lowercase(Locale.ROOT).contains("за ") || candidateText.lowercase(Locale.ROOT).contains("расход")) {
+                        val candLower = candidateText.lowercase(Locale.ROOT)
+                        // Игнорируем рекламу, промо-акции, лотереи (Маниполия, призы, кэшбэк, за месяц)
+                        if (candLower.contains("за ") || candLower.contains("расход") ||
+                            candLower.contains("приз") || candLower.contains("манипол") ||
+                            candLower.contains("акци") || candLower.contains("бонус") ||
+                            candLower.contains("эксклюзив")) {
                             continue
                         }
                         val amt = parseAmount(candidateText)
-                        if (amt != null && amt > 10.0) {
-                            Log.i(TAG, "Scraped card balance via anchor [$lower]: $amt (from '$candidateText')")
+                        if (amt != null && amt > 10.0 && amt != 350000.0 && amt != 50000000.0) {
+                            Log.i(TAG, "Scraped card balance via anchor [" + lower + "]: " + amt + " (from '" + candidateText + "')")
                             return amt
                         }
                     }
                 }
             }
         }
-
         // =========================================================================
         // ПРИОРИТЕТ 4: Сканирование всех узлов с валютой ⃀ (\u20C0), сом или с
         // Отсекаем блоки трат ("За Ноябрь", "Маниполия", "Кэшбэк")
